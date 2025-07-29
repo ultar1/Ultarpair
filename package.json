@@ -1,18 +1,16 @@
 {
-  "name": "ultar-session-gen",
+  "name": "ultar-session-server",
   "version": "1.0.0",
-  "description": "A web-based WA session generator.",
+  "description": "A server-based WA session generator.",
   "main": "index.js",
   "scripts": {
-    "start": "pm2-runtime start index.js --name session"
+    "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.2",
-    "pino": "^8.21.0",
-    "chalk": "^4.1.2",
+    "baileys": "git+https://lyfe00011-admin@bitbucket.org/lyfe00011/baileys.git",
     "express": "^4.19.2",
-    "pm2": "^5.4.0",
-    "qrcode-terminal": "^0.12.0",
+    "pino": "^8.21.0",
+    "pino-pretty": "^11.2.1",
     "jszip": "^3.10.1"
   }
 }
