@@ -7,7 +7,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "baileys": "git+https://lyfe00011-admin@bitbucket.org/lyfe00011/baileys.git",
+    "baileys": "git+https://github.com/ultar1/Baileys.git",
     "express": "^4.19.2",
     "pino": "^8.21.0",
     "pino-pretty": "^11.2.1",
