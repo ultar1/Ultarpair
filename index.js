@@ -69,16 +69,38 @@ async function startSocket() {
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false,
-    logger: logger.child({ module: 'baileys' })
+    logger: logger.child({ module: 'baileys' }),
+    browser: ['CustomBot', 'Chrome', '1.0.0']
   })
+
+  sock.ev.on('creds.update', saveCreds)
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update
 
     if (qr) {
-      const qrImage = await QRCode.toDataURL(qr)
-      broadcast({ type: 'qr', data: qrImage })
-      logger.info('QR code generated and broadcasted')
+      try {
+        const qrImage = await QRCode.toDataURL(qr)
+        broadcast({ type: 'qr', data: qrImage })
+        logger.info('📡 QR code generated and sent to clients')
+      } catch (err) {
+        logger.error('❌ Failed to generate QR code:', err)
+      }
+    }
+
+    if (connection === 'open') {
+      logger.info('✅ WhatsApp connection established')
+      broadcast({ type: 'status', data: 'Connected to WhatsApp' })
+
+      // Pairing code logic after connection opens
+      const phoneNumber = '2348012345678'
+      try {
+        const code = await sock.requestPairingCode(phoneNumber)
+        broadcast({ type: 'pairing', data: code })
+        logger.info(`🔐 Pairing code generated: ${code}`)
+      } catch (err) {
+        logger.error('❌ Failed to generate pairing code:', err)
+      }
     }
 
     if (connection === 'close') {
@@ -87,31 +109,10 @@ async function startSocket() {
         lastDisconnect.error.output?.statusCode === DisconnectReason.restartRequired
 
       if (shouldReconnect) {
-        logger.warn('Restart required. Reconnecting...')
+        logger.warn('🔄 Restart required. Reconnecting...')
         startSocket()
       } else {
-        logger.error('Connection closed:', lastDisconnect?.error)
-      }
-    }
-
-    if (connection === 'open') {
-      logger.info('✅ Connected to WhatsApp')
-      broadcast({ type: 'status', data: 'Connected to WhatsApp' })
-    }
-  })
-
-  sock.ev.on('creds.update', saveCreds)
-
-  sock.ev.on('connection.update', async (update) => {
-    const { connection, qr } = update
-    if (connection === 'connecting' || !!qr) {
-      const phoneNumber = '2348012345678'
-      try {
-        const code = await sock.requestPairingCode(phoneNumber)
-        broadcast({ type: 'pairing', data: code })
-        logger.info(`Pairing code generated: ${code}`)
-      } catch (err) {
-        logger.error('Failed to generate pairing code:', err)
+        logger.error('❌ Connection closed:', lastDisconnect?.error)
       }
     }
   })
@@ -121,5 +122,5 @@ startSocket()
 
 const PORT = process.env.PORT || 3000
 server.listen(PORT, () => {
-  logger.info(`🌐 Server running on http://localhost:${PORT}`)
+  logger.info(`🌐 Server running at http://localhost:${PORT}`)
 })
