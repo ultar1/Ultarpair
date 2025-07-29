@@ -10,24 +10,29 @@ const JSZip = require('jszip');
 const chalk = require('chalk');
 
 // --- CONFIGURATION ---
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
-const APP_URL = process.env.APP_URL; // Your app's public URL (e.g., https://your-app.onrender.com)
+// 1. Hardcoded the Telegram Bot Token as requested.
+const TELEGRAM_TOKEN = '8029175609:AAFyEm6APB8giEJh7-nImaAaFRA0JP2caMY'; 
+
+// Read environment variables for deployment
+const APP_URL = process.env.APP_URL;
 const PORT = process.env.PORT || 3000;
 
 if (!TELEGRAM_TOKEN || !APP_URL) {
-    console.error(chalk.red('Error: TELEGRAM_TOKEN and APP_URL environment variables must be set.'));
+    console.error(chalk.red('Error: TELEGRAM_TOKEN (in code) and APP_URL (in environment variables) must be set.'));
     process.exit(1);
 }
 
 // --- TELEGRAM BOT SETUP (WEBHOOK MODE) ---
 const bot = new TelegramBot(TELEGRAM_TOKEN);
-const webhookUrl = `${APP_URL}/bot${TELEGRAM_TOKEN}`;
+
+// 2. Fixed the double-slash issue by removing any trailing slash from APP_URL.
+const cleanAppUrl = APP_URL.replace(/\/$/, ''); 
+const webhookUrl = `${cleanAppUrl}/bot${TELEGRAM_TOKEN}`;
 bot.setWebHook(webhookUrl);
 
 const app = express();
 app.use(express.json());
 
-// This is the endpoint Telegram will send updates to
 app.post(`/bot${TELEGRAM_TOKEN}`, (req, res) => {
     bot.processUpdate(req.body);
     res.sendStatus(200);
@@ -44,7 +49,6 @@ bot.onText(/\/start/, (msg) => {
     bot.sendMessage(msg.chat.id, "Welcome! Use /reqpair <whatsapp_number_with_country_code> to get your session ID.");
 });
 
-// This is the fixed /reqpair command
 bot.onText(/\/reqpair(.*)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const phoneNumber = match[1] ? match[1].trim() : '';
