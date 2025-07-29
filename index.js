@@ -8,7 +8,7 @@ const pino = require('pino');
 const fs = require('fs');
 const path = require('path');
 const JSZip = require('jszip');
-const chalk = chalk;
+const chalk = require('chalk'); // This line has been corrected
 
 const PORT = process.env.PORT || 3000;
 const app = express();
