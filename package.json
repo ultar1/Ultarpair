@@ -4,7 +4,7 @@
   "description": "A server-based WA session generator.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "pmz-runtime start index.js --nameultar-gen"
   },
   "dependencies": {
     "baileys": "git+https://github.com/ultar1/Baileys.git",
