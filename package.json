@@ -1,17 +1,35 @@
 {
   "name": "ultar-session-gen",
   "version": "1.0.0",
-  "description": "A web-based WA session generator.",
+  "description": "A web-based WhatsApp session generator using Baileys.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ultar1/Baileys.git"
+  },
+  "keywords": [
+    "whatsapp",
+    "baileys",
+    "session",
+    "generator",
+    "express",
+    "qrcode"
+  ],
+  "author": "Emmanuel",
+  "license": "MIT",
   "dependencies": {
     "baileys": "git+https://github.com/ultar1/Baileys.git",
-    "express": "^4.19.2",
-    "pino": "^8.21.0",
     "chalk": "^4.1.2",
-    "qrcode": "^1.5.3",
-    "jszip": "^3.10.1"
+    "express": "^4.19.2",
+    "jszip": "^3.10.1",
+    "pino": "^8.21.0",
+    "qrcode": "^1.5.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
   }
 }
