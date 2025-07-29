@@ -1,3 +1,4 @@
+// index.js
 import express from 'express'
 import http from 'http'
 import { WebSocketServer } from 'ws'
@@ -5,6 +6,7 @@ import { makeWASocket, DisconnectReason } from 'baileys'
 import { Boom } from '@hapi/boom'
 import QRCode from 'qrcode'
 import dotenv from 'dotenv'
+import logger from './logger.js'
 import { getSession, saveSession } from './db.js'
 
 dotenv.config()
@@ -66,7 +68,8 @@ async function startSocket() {
 
   const sock = makeWASocket({
     auth: state,
-    printQRInTerminal: false
+    printQRInTerminal: false,
+    logger: logger.child({ module: 'baileys' })
   })
 
   sock.ev.on('connection.update', async (update) => {
@@ -75,6 +78,7 @@ async function startSocket() {
     if (qr) {
       const qrImage = await QRCode.toDataURL(qr)
       broadcast({ type: 'qr', data: qrImage })
+      logger.info('QR code generated and broadcasted')
     }
 
     if (connection === 'close') {
@@ -83,15 +87,15 @@ async function startSocket() {
         lastDisconnect.error.output?.statusCode === DisconnectReason.restartRequired
 
       if (shouldReconnect) {
-        console.log('🔄 Restarting socket...')
+        logger.warn('Restart required. Reconnecting...')
         startSocket()
       } else {
-        console.error('❌ Connection closed:', lastDisconnect?.error)
+        logger.error('Connection closed:', lastDisconnect?.error)
       }
     }
 
     if (connection === 'open') {
-      console.log('✅ Connected to WhatsApp')
+      logger.info('✅ Connected to WhatsApp')
       broadcast({ type: 'status', data: 'Connected to WhatsApp' })
     }
   })
@@ -102,8 +106,13 @@ async function startSocket() {
     const { connection, qr } = update
     if (connection === 'connecting' || !!qr) {
       const phoneNumber = '2348012345678'
-      const code = await sock.requestPairingCode(phoneNumber)
-      broadcast({ type: 'pairing', data: code })
+      try {
+        const code = await sock.requestPairingCode(phoneNumber)
+        broadcast({ type: 'pairing', data: code })
+        logger.info(`Pairing code generated: ${code}`)
+      } catch (err) {
+        logger.error('Failed to generate pairing code:', err)
+      }
     }
   })
 }
@@ -112,5 +121,5 @@ startSocket()
 
 const PORT = process.env.PORT || 3000
 server.listen(PORT, () => {
-  console.log(`🌐 Server running on http://localhost:${PORT}`)
+  logger.info(`🌐 Server running on http://localhost:${PORT}`)
 })
