@@ -45,13 +45,17 @@ async function usePostgresAuthState() {
       creds,
       keys: {
         get: async (type, ids) => {
-          return (keys[type] || {}) || {}
+          const result = {}
+          for (const id of ids) {
+            result[id] = keys[type]?.[id]
+          }
+          return result
         },
         set: async (data) => {
-          for (const key in data) {
-            keys[key] = {
-              ...(keys[key] || {}),
-              ...data[key]
+          for (const category in data) {
+            if (!keys[category]) keys[category] = {}
+            for (const id in data[category]) {
+              keys[category][id] = data[category][id]
             }
           }
         }
@@ -92,7 +96,6 @@ async function startSocket() {
       logger.info('✅ WhatsApp connection established')
       broadcast({ type: 'status', data: 'Connected to WhatsApp' })
 
-      // Pairing code logic after connection opens
       const phoneNumber = '2348012345678'
       try {
         const code = await sock.requestPairingCode(phoneNumber)
@@ -104,15 +107,14 @@ async function startSocket() {
     }
 
     if (connection === 'close') {
-      const shouldReconnect =
-        (lastDisconnect?.error instanceof Boom) &&
-        lastDisconnect.error.output?.statusCode === DisconnectReason.restartRequired
+      const reason = new Boom(lastDisconnect?.error)?.output?.statusCode
+      const shouldReconnect = reason === DisconnectReason.restartRequired
 
       if (shouldReconnect) {
         logger.warn('🔄 Restart required. Reconnecting...')
         startSocket()
       } else {
-        logger.error('❌ Connection closed:', lastDisconnect?.error)
+        logger.error(`❌ Connection closed with reason ${reason}`, lastDisconnect?.error)
       }
     }
   })
