@@ -1,13 +1,14 @@
 const express = require('express');
 const {
     default: makeWASocket,
-    useMultiFileAuthState
+    useMultiFileAuthState,
+    makeCacheableSignalKeyStore
 } = require('baileys');
 const pino = require('pino');
 const fs = require('fs');
 const path = require('path');
 const JSZip = require('jszip');
-const chalk = require('chalk');
+const chalk = chalk;
 
 const PORT = process.env.PORT || 3000;
 const app = express();
@@ -49,69 +50,105 @@ app.get('/', (req, res) => {
     res.send(getPage(form));
 });
 
+let pairingProcess = {};
+
 app.post('/pair', async (req, res) => {
     const phoneNumber = req.body.phoneNumber;
     if (!phoneNumber || !/^\+\d{10,}$/.test(phoneNumber)) {
         return res.status(400).send(getPage('<h1>Error</h1><p>Invalid phone number format. Please go back and try again.</p>'));
     }
 
+    const processId = Date.now();
+    pairingProcess[processId] = { res };
+    res.setHeader('Content-Type', 'text/html');
+    res.write(getPage(`<h1>Connecting...</h1><p>Attempting to connect to WhatsApp for ${phoneNumber}. This may take up to 45 seconds. Do not close this page.</p>`));
+
+    generateSession(phoneNumber, processId);
+});
+
+app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+});
+
+// --- Baileys Connection Logic ---
+async function generateSession(phoneNumber, processId) {
+    const { res } = pairingProcess[processId];
     const sessionDir = path.join(__dirname, `session_${phoneNumber.replace('+', '')}`);
-    if (fs.existsSync(sessionDir)) {
-        fs.rmSync(sessionDir, { recursive: true, force: true });
-    }
+    let bot;
+    let timeout;
+
+    const cleanup = () => {
+        if (bot) bot.ws.close();
+        if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true });
+        if (timeout) clearTimeout(timeout);
+        delete pairingProcess[processId];
+    };
 
     try {
-        const logger = pino({ level: 'trace' });
+        if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true });
+        
+        const logger = pino({ level: 'silent' });
         const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-        const bot = makeWASocket({
+        
+        bot = makeWASocket({
             logger,
             printQRInTerminal: false,
-            auth: state,
+            auth: {
+                creds: state.creds,
+                keys: makeCacheableSignalKeyStore(state.keys, logger),
+            },
             browser: ['Server Pairing', 'Chrome', '1.0.0']
         });
 
-        // Add a delay to ensure the socket is ready before requesting the code
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        const code = await bot.requestPairingCode(phoneNumber);
-        
-        res.send(getPage(`<h1>Pairing Code</h1><p>Your code for ${phoneNumber} is:</p><h2 class="message">${code}</h2><p>Enter this code in WhatsApp on your phone. The session will be sent to your WhatsApp chat after you connect.</p>`));
+        timeout = setTimeout(() => {
+            res.end(getPage('<h1>Error</h1><p>Connection timed out. The server is likely blocked by WhatsApp.</p>'));
+            cleanup();
+        }, 45000); // 45-second timeout
 
         bot.ev.on('creds.update', saveCreds);
 
         bot.ev.on('connection.update', async (update) => {
-            if (update.connection === 'open') {
-                console.log(chalk.green(`Paired successfully with ${phoneNumber}. Sending session...`));
-                const zip = new JSZip();
-                const files = fs.readdirSync(sessionDir);
-                for (const file of files) {
-                    zip.file(file, fs.readFileSync(path.join(sessionDir, file)));
+            const { connection } = update;
+
+            if (connection === 'open') {
+                clearTimeout(timeout);
+                try {
+                    const code = await bot.requestPairingCode(phoneNumber);
+                    res.write(getPage(`<h1>Pairing Code</h1><p>Your code for ${phoneNumber} is:</p><h2 class="message">${code}</h2><p>Enter this in WhatsApp. The page will update after you connect.</p>`));
+                    
+                    bot.ev.once('connection.update', async (finalUpdate) => {
+                        if (finalUpdate.connection === 'open') {
+                            res.write(getPage(`<h1>Success!</h1><p>Paired successfully. Generating and sending session ID to your WhatsApp...</p>`));
+                            const zip = new JSZip();
+                            const files = fs.readdirSync(sessionDir);
+                            for (const file of files) zip.file(file, fs.readFileSync(path.join(sessionDir, file)));
+                            const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+                            const sessionId = buffer.toString('base64');
+                            const message = `Here is your SESSION_ID:\n\n\`\`\`${sessionId}\`\`\``;
+                            await bot.sendMessage(bot.user.id, { text: message });
+                            res.end(getPage(`<h1>Done!</h1><p>Session ID has been sent to your WhatsApp.</p>`));
+                            cleanup();
+                        }
+                    });
+                } catch (error) {
+                    res.end(getPage('<h1>Error</h1><p>Failed to request pairing code.</p>'));
+                    cleanup();
                 }
-                const buffer = await zip.generateAsync({ type: 'nodebuffer' });
-                const sessionId = buffer.toString('base64');
-                const message = `Here is your SESSION_ID:\n\n\`\`\`${sessionId}\`\`\``;
-
-                await bot.sendMessage(bot.user.id, { text: message });
-                console.log(chalk.cyan('Session ID sent.'));
-
-                await bot.ws.close();
-                fs.rmSync(sessionDir, { recursive: true, force: true });
-                // Cleanly exit to allow server to restart if needed
-                setTimeout(() => process.exit(0), 2000);
             }
 
-            if (update.connection === 'close') {
-                 if (fs.existsSync(sessionDir)) {
-                    fs.rmSync(sessionDir, { recursive: true, force: true });
+            if (connection === 'close') {
+                clearTimeout(timeout);
+                if (pairingProcess[processId]) { // Check if response is still open
+                    res.end(getPage('<h1>Connection Closed</h1><p>The connection to WhatsApp was closed unexpectedly.</p>'));
                 }
+                cleanup();
             }
         });
 
     } catch (error) {
-        console.error(chalk.red("Pairing process failed:"), error);
-        res.status(500).send(getPage('<h1>Error</h1><p>Could not initiate pairing. The server might be blocked or the number is invalid.</p>'));
+        if (pairingProcess[processId]) {
+            res.end(getPage('<h1>Critical Error</h1><p>An unexpected error occurred.</p>'));
+        }
+        cleanup();
     }
-});
-
-app.listen(PORT, () => {
-    console.log(chalk.green(`Server is running on port ${PORT}`));
-});
+}
