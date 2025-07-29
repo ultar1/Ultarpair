@@ -10,10 +10,7 @@ const JSZip = require('jszip');
 const chalk = require('chalk');
 
 // --- CONFIGURATION ---
-// 1. Hardcoded the Telegram Bot Token as requested.
-const TELEGRAM_TOKEN = '8029175609:AAFyEm6APB8giEJh7-nImaAaFRA0JP2caMY'; 
-
-// Read environment variables for deployment
+const TELEGRAM_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN_HERE';
 const APP_URL = process.env.APP_URL;
 const PORT = process.env.PORT || 3000;
 
@@ -24,25 +21,20 @@ if (!TELEGRAM_TOKEN || !APP_URL) {
 
 // --- TELEGRAM BOT SETUP (WEBHOOK MODE) ---
 const bot = new TelegramBot(TELEGRAM_TOKEN);
-
-// 2. Fixed the double-slash issue by removing any trailing slash from APP_URL.
-const cleanAppUrl = APP_URL.replace(/\/$/, ''); 
+const cleanAppUrl = APP_URL.replace(/\/$/, '');
 const webhookUrl = `${cleanAppUrl}/bot${TELEGRAM_TOKEN}`;
 bot.setWebHook(webhookUrl);
 
 const app = express();
 app.use(express.json());
-
 app.post(`/bot${TELEGRAM_TOKEN}`, (req, res) => {
     bot.processUpdate(req.body);
     res.sendStatus(200);
 });
-
 app.listen(PORT, () => {
     console.log(chalk.green(`Server is running on port ${PORT}`));
     console.log(chalk.blue(`Webhook is set to ${webhookUrl}`));
 });
-
 
 // --- COMMAND HANDLERS ---
 bot.onText(/\/start/, (msg) => {
@@ -54,18 +46,17 @@ bot.onText(/\/reqpair(.*)/, async (msg, match) => {
     const phoneNumber = match[1] ? match[1].trim() : '';
 
     if (!phoneNumber || !/^\+\d{10,}$/.test(phoneNumber)) {
-        bot.sendMessage(chatId, "Please provide a valid WhatsApp number including the country code.\n\nExample: `/reqpair +1234567890`", { parse_mode: 'Markdown'});
+        bot.sendMessage(chatId, "Please provide a valid WhatsApp number including the country code.\n\nExample: `/reqpair +1234567890`", { parse_mode: 'Markdown' });
         return;
     }
 
     const sessionDir = `./temp_session_${phoneNumber.replace('+', '')}`;
+    if (fs.existsSync(sessionDir)) {
+        fs.rmSync(sessionDir, { recursive: true, force: true });
+    }
 
     try {
-        if (fs.existsSync(sessionDir)) {
-            fs.rmSync(sessionDir, { recursive: true, force: true });
-        }
-
-        await bot.sendMessage(chatId, "Request received. Generating pairing code...");
+        await bot.sendMessage(chatId, "Request received. Initializing connection...");
 
         const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
         const waBot = makeWASocket({
@@ -75,31 +66,49 @@ bot.onText(/\/reqpair(.*)/, async (msg, match) => {
             browser: ['Session Generator', 'Chrome', '1.0.0']
         });
 
-        const pairingCode = await waBot.requestPairingCode(phoneNumber);
-        await bot.sendMessage(chatId, `Your pairing code is: *${pairingCode}*\n\nEnter this code on your WhatsApp device. The session ID will be sent to your WhatsApp chat upon connection.`, { parse_mode: 'Markdown' });
+        // We use a flag to ensure we only request the code once.
+        let codeRequested = false;
 
         waBot.ev.on('creds.update', saveCreds);
 
         waBot.ev.on('connection.update', async (update) => {
-            if (update.connection === 'open') {
-                await bot.sendMessage(chatId, "Successfully paired! Generating and sending session string to your WhatsApp...");
+            const { connection } = update;
 
-                const zip = new JSZip();
-                const files = fs.readdirSync(sessionDir);
-                for (const file of files) {
-                    const data = fs.readFileSync(`${sessionDir}/${file}`);
-                    zip.file(file, data);
+            // This block runs when the connection is fully established.
+            if (connection === 'open') {
+                // Check if we have already requested the code.
+                // This 'open' event can fire multiple times.
+                if (!codeRequested) {
+                    codeRequested = true;
+                    // Now that the connection is ready, we request the code.
+                    const pairingCode = await waBot.requestPairingCode(phoneNumber);
+                    await bot.sendMessage(chatId, `Connection ready. Your pairing code is: *${pairingCode}*\n\nEnter this on your device.`, { parse_mode: 'Markdown' });
+                } else {
+                    // This 'open' event happens AFTER the user pairs successfully.
+                    await bot.sendMessage(chatId, "Successfully paired! Generating session string...");
+
+                    const zip = new JSZip();
+                    const files = fs.readdirSync(sessionDir);
+                    for (const file of files) {
+                        const data = fs.readFileSync(`${sessionDir}/${file}`);
+                        zip.file(file, data);
+                    }
+
+                    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+                    const sessionId = buffer.toString('base64');
+                    const message = `Here is your SESSION_ID:\n\n\`\`\`${sessionId}\`\`\``;
+
+                    await waBot.sendMessage(`${phoneNumber}@s.whatsapp.net`, { text: message });
+                    await bot.sendMessage(chatId, "Session ID has been sent to your WhatsApp. You can now close this bot.");
+
+                    // Clean up
+                    await waBot.ws.close();
+                    fs.rmSync(sessionDir, { recursive: true, force: true });
                 }
+            }
 
-                const buffer = await zip.generateAsync({ type: 'nodebuffer' });
-                const sessionId = buffer.toString('base64');
-                const message = `Here is your SESSION_ID:\n\n\`\`\`${sessionId}\`\`\``;
-                
-                await waBot.sendMessage(`${phoneNumber}@s.whatsapp.net`, { text: message });
-                await bot.sendMessage(chatId, "Your session ID has been sent to your WhatsApp. You can now use it in your main bot's deployment.");
-                
-                await waBot.ws.close();
-                fs.rmSync(sessionDir, { recursive: true, force: true });
+            if (connection === 'close') {
+                 // You can add logic here if the connection closes unexpectedly
             }
         });
 
