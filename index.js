@@ -6,14 +6,12 @@ const {
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const fs = require('fs');
+const path = require('path');
 const JSZip = require('jszip');
 const chalk = require('chalk');
 
 // --- CONFIGURATION ---
-// Hardcoded the Telegram Bot Token from your log.
 const TELEGRAM_TOKEN = '8029175609:AAFyEm6APB8giEJh7-nImaAaFRA0JP2caMY';
-
-// Read environment variables for deployment
 const APP_URL = process.env.APP_URL;
 const PORT = process.env.PORT || 3000;
 
@@ -24,23 +22,20 @@ if (!APP_URL) {
 
 // --- TELEGRAM BOT SETUP (WEBHOOK MODE) ---
 const bot = new TelegramBot(TELEGRAM_TOKEN);
-const cleanAppUrl = APP_URL.replace(/\/$/, ''); 
+const cleanAppUrl = APP_URL.replace(/\/$/, '');
 const webhookUrl = `${cleanAppUrl}/bot${TELEGRAM_TOKEN}`;
 bot.setWebHook(webhookUrl);
 
 const app = express();
 app.use(express.json());
-
 app.post(`/bot${TELEGRAM_TOKEN}`, (req, res) => {
     bot.processUpdate(req.body);
     res.sendStatus(200);
 });
-
 app.listen(PORT, () => {
     console.log(chalk.green(`Server is running on port ${PORT}`));
     console.log(chalk.blue(`Webhook is set to ${webhookUrl}`));
 });
-
 
 // --- COMMAND HANDLERS ---
 bot.onText(/\/start/, (msg) => {
@@ -52,16 +47,19 @@ bot.onText(/\/reqpair(.*)/, async (msg, match) => {
     const phoneNumber = match[1] ? match[1].trim() : '';
 
     if (!phoneNumber || !/^\+\d{10,}$/.test(phoneNumber)) {
-        bot.sendMessage(chatId, "Please provide a valid WhatsApp number including the country code.\n\nExample: `/reqpair +1234567890`", { parse_mode: 'Markdown'});
+        bot.sendMessage(chatId, "Please provide a valid WhatsApp number including the country code.\n\nExample: `/reqpair +1234567890`", { parse_mode: 'Markdown' });
         return;
     }
 
-    const sessionDir = `./temp_session_${phoneNumber.replace('+', '')}`;
-    if (fs.existsSync(sessionDir)) {
-        fs.rmSync(sessionDir, { recursive: true, force: true });
-    }
+    const sessionDir = path.join(__dirname, `temp_session_${phoneNumber.replace('+', '')}`);
 
     try {
+        if (fs.existsSync(sessionDir)) {
+            fs.rmSync(sessionDir, { recursive: true, force: true });
+        }
+        // Ensure the directory exists before using it
+        fs.mkdirSync(sessionDir, { recursive: true });
+
         await bot.sendMessage(chatId, "Request received. Initializing connection...");
 
         const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
@@ -77,20 +75,25 @@ bot.onText(/\/reqpair(.*)/, async (msg, match) => {
         waBot.ev.on('creds.update', saveCreds);
 
         waBot.ev.on('connection.update', async (update) => {
-            const { connection } = update;
+            const { connection, lastDisconnect } = update;
 
             if (connection === 'open') {
                 if (!codeRequested) {
                     codeRequested = true;
-                    const pairingCode = await waBot.requestPairingCode(phoneNumber);
-                    await bot.sendMessage(chatId, `Connection ready. Your pairing code is: *${pairingCode}*\n\nEnter this on your device.`, { parse_mode: 'Markdown' });
+                    try {
+                        const pairingCode = await waBot.requestPairingCode(phoneNumber);
+                        await bot.sendMessage(chatId, `Connection ready. Your pairing code is: *${pairingCode}*\n\nEnter this on your device.`, { parse_mode: 'Markdown' });
+                    } catch (error) {
+                         console.error("Error requesting pairing code:", error);
+                         await bot.sendMessage(chatId, "Failed to request pairing code. The WhatsApp connection may have been blocked. Please try again later.");
+                    }
                 } else {
-                    await bot.sendMessage(chatId, "Successfully paired! Generating session string...");
+                    await bot.sendMessage(chatId, "Successfully paired! Generating and sending session string to your WhatsApp...");
 
                     const zip = new JSZip();
                     const files = fs.readdirSync(sessionDir);
                     for (const file of files) {
-                        const data = fs.readFileSync(`${sessionDir}/${file}`);
+                        const data = fs.readFileSync(path.join(sessionDir, file));
                         zip.file(file, data);
                     }
 
@@ -102,6 +105,12 @@ bot.onText(/\/reqpair(.*)/, async (msg, match) => {
                     await bot.sendMessage(chatId, "Session ID has been sent to your WhatsApp.");
                     
                     await waBot.ws.close();
+                }
+            }
+
+            if (connection === 'close') {
+                console.log('Connection closed.', lastDisconnect?.error);
+                if (fs.existsSync(sessionDir)) {
                     fs.rmSync(sessionDir, { recursive: true, force: true });
                 }
             }
@@ -109,7 +118,7 @@ bot.onText(/\/reqpair(.*)/, async (msg, match) => {
 
     } catch (error) {
         console.error("Pairing Error:", error);
-        bot.sendMessage(chatId, "An error occurred during the pairing process. Please check the logs.");
+        bot.sendMessage(chatId, "A critical error occurred. Please check the logs.");
         if (fs.existsSync(sessionDir)) {
             fs.rmSync(sessionDir, { recursive: true, force: true });
         }
