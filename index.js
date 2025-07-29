@@ -10,31 +10,37 @@ const JSZip = require('jszip');
 const chalk = require('chalk');
 
 // --- CONFIGURATION ---
-const TELEGRAM_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN_HERE';
+// Hardcoded the Telegram Bot Token from your log.
+const TELEGRAM_TOKEN = '8029175609:AAFyEm6APB8giEJh7-nImaAaFRA0JP2caMY';
+
+// Read environment variables for deployment
 const APP_URL = process.env.APP_URL;
 const PORT = process.env.PORT || 3000;
 
-if (!TELEGRAM_TOKEN || !APP_URL) {
-    console.error(chalk.red('Error: TELEGRAM_TOKEN (in code) and APP_URL (in environment variables) must be set.'));
+if (!APP_URL) {
+    console.error(chalk.red('Error: APP_URL environment variable must be set.'));
     process.exit(1);
 }
 
 // --- TELEGRAM BOT SETUP (WEBHOOK MODE) ---
 const bot = new TelegramBot(TELEGRAM_TOKEN);
-const cleanAppUrl = APP_URL.replace(/\/$/, '');
+const cleanAppUrl = APP_URL.replace(/\/$/, ''); 
 const webhookUrl = `${cleanAppUrl}/bot${TELEGRAM_TOKEN}`;
 bot.setWebHook(webhookUrl);
 
 const app = express();
 app.use(express.json());
+
 app.post(`/bot${TELEGRAM_TOKEN}`, (req, res) => {
     bot.processUpdate(req.body);
     res.sendStatus(200);
 });
+
 app.listen(PORT, () => {
     console.log(chalk.green(`Server is running on port ${PORT}`));
     console.log(chalk.blue(`Webhook is set to ${webhookUrl}`));
 });
+
 
 // --- COMMAND HANDLERS ---
 bot.onText(/\/start/, (msg) => {
@@ -46,7 +52,7 @@ bot.onText(/\/reqpair(.*)/, async (msg, match) => {
     const phoneNumber = match[1] ? match[1].trim() : '';
 
     if (!phoneNumber || !/^\+\d{10,}$/.test(phoneNumber)) {
-        bot.sendMessage(chatId, "Please provide a valid WhatsApp number including the country code.\n\nExample: `/reqpair +1234567890`", { parse_mode: 'Markdown' });
+        bot.sendMessage(chatId, "Please provide a valid WhatsApp number including the country code.\n\nExample: `/reqpair +1234567890`", { parse_mode: 'Markdown'});
         return;
     }
 
@@ -66,7 +72,6 @@ bot.onText(/\/reqpair(.*)/, async (msg, match) => {
             browser: ['Session Generator', 'Chrome', '1.0.0']
         });
 
-        // We use a flag to ensure we only request the code once.
         let codeRequested = false;
 
         waBot.ev.on('creds.update', saveCreds);
@@ -74,17 +79,12 @@ bot.onText(/\/reqpair(.*)/, async (msg, match) => {
         waBot.ev.on('connection.update', async (update) => {
             const { connection } = update;
 
-            // This block runs when the connection is fully established.
             if (connection === 'open') {
-                // Check if we have already requested the code.
-                // This 'open' event can fire multiple times.
                 if (!codeRequested) {
                     codeRequested = true;
-                    // Now that the connection is ready, we request the code.
                     const pairingCode = await waBot.requestPairingCode(phoneNumber);
                     await bot.sendMessage(chatId, `Connection ready. Your pairing code is: *${pairingCode}*\n\nEnter this on your device.`, { parse_mode: 'Markdown' });
                 } else {
-                    // This 'open' event happens AFTER the user pairs successfully.
                     await bot.sendMessage(chatId, "Successfully paired! Generating session string...");
 
                     const zip = new JSZip();
@@ -97,18 +97,13 @@ bot.onText(/\/reqpair(.*)/, async (msg, match) => {
                     const buffer = await zip.generateAsync({ type: 'nodebuffer' });
                     const sessionId = buffer.toString('base64');
                     const message = `Here is your SESSION_ID:\n\n\`\`\`${sessionId}\`\`\``;
-
+                    
                     await waBot.sendMessage(`${phoneNumber}@s.whatsapp.net`, { text: message });
-                    await bot.sendMessage(chatId, "Session ID has been sent to your WhatsApp. You can now close this bot.");
-
-                    // Clean up
+                    await bot.sendMessage(chatId, "Session ID has been sent to your WhatsApp.");
+                    
                     await waBot.ws.close();
                     fs.rmSync(sessionDir, { recursive: true, force: true });
                 }
-            }
-
-            if (connection === 'close') {
-                 // You can add logic here if the connection closes unexpectedly
             }
         });
 
