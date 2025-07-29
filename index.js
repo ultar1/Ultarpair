@@ -2,7 +2,8 @@ const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const {
     default: makeWASocket,
-    useMultiFileAuthState
+    useMultiFileAuthState,
+    makeCacheableSignalKeyStore
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const fs = require('fs');
@@ -52,75 +53,92 @@ bot.onText(/\/reqpair(.*)/, async (msg, match) => {
     }
 
     const sessionDir = path.join(__dirname, `temp_session_${phoneNumber.replace('+', '')}`);
+    let waBot;
+    let connectionTimeout;
+
+    const cleanup = () => {
+        if (waBot) {
+            waBot.ws.close();
+        }
+        if (fs.existsSync(sessionDir)) {
+            fs.rmSync(sessionDir, { recursive: true, force: true });
+        }
+        if (connectionTimeout) {
+            clearTimeout(connectionTimeout);
+        }
+    };
 
     try {
         if (fs.existsSync(sessionDir)) {
             fs.rmSync(sessionDir, { recursive: true, force: true });
         }
-        // Ensure the directory exists before using it
         fs.mkdirSync(sessionDir, { recursive: true });
 
-        await bot.sendMessage(chatId, "Request received. Initializing connection...");
-
+        await bot.sendMessage(chatId, "Request received. Initializing connection... This may take up to 30 seconds.");
+        
+        const logger = pino({ level: 'silent' });
         const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-        const waBot = makeWASocket({
-            logger: pino({ level: 'silent' }),
+        
+        waBot = makeWASocket({
+            logger,
             printQRInTerminal: false,
-            auth: state,
+            auth: {
+                creds: state.creds,
+                keys: makeCacheableSignalKeyStore(state.keys, logger),
+            },
             browser: ['Session Generator', 'Chrome', '1.0.0']
         });
 
-        let codeRequested = false;
+        // --- Timeout Logic ---
+        connectionTimeout = setTimeout(() => {
+            bot.sendMessage(chatId, "Connection timed out. The server is likely blocked by WhatsApp. Please try again later or use a different deployment method.");
+            cleanup();
+        }, 30000); // 30 second timeout
 
         waBot.ev.on('creds.update', saveCreds);
 
         waBot.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect } = update;
+            const { connection } = update;
 
             if (connection === 'open') {
-                if (!codeRequested) {
-                    codeRequested = true;
-                    try {
-                        const pairingCode = await waBot.requestPairingCode(phoneNumber);
-                        await bot.sendMessage(chatId, `Connection ready. Your pairing code is: *${pairingCode}*\n\nEnter this on your device.`, { parse_mode: 'Markdown' });
-                    } catch (error) {
-                         console.error("Error requesting pairing code:", error);
-                         await bot.sendMessage(chatId, "Failed to request pairing code. The WhatsApp connection may have been blocked. Please try again later.");
-                    }
-                } else {
-                    await bot.sendMessage(chatId, "Successfully paired! Generating and sending session string to your WhatsApp...");
+                clearTimeout(connectionTimeout); // Success, clear the timeout
+                
+                try {
+                    const pairingCode = await waBot.requestPairingCode(phoneNumber);
+                    await bot.sendMessage(chatId, `Connection ready. Your pairing code is: *${pairingCode}*\n\nEnter this on your device.`, { parse_mode: 'Markdown' });
 
-                    const zip = new JSZip();
-                    const files = fs.readdirSync(sessionDir);
-                    for (const file of files) {
-                        const data = fs.readFileSync(path.join(sessionDir, file));
-                        zip.file(file, data);
-                    }
-
-                    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
-                    const sessionId = buffer.toString('base64');
-                    const message = `Here is your SESSION_ID:\n\n\`\`\`${sessionId}\`\`\``;
-                    
-                    await waBot.sendMessage(`${phoneNumber}@s.whatsapp.net`, { text: message });
-                    await bot.sendMessage(chatId, "Session ID has been sent to your WhatsApp.");
-                    
-                    await waBot.ws.close();
+                    // This second 'open' event happens AFTER the user pairs successfully.
+                    waBot.ev.once('connection.update', async (finalUpdate) => {
+                         if (finalUpdate.connection === 'open') {
+                            await bot.sendMessage(chatId, "Successfully paired! Generating session string...");
+                            const zip = new JSZip();
+                            const files = fs.readdirSync(sessionDir);
+                            for (const file of files) {
+                                zip.file(file, fs.readFileSync(path.join(sessionDir, file)));
+                            }
+                            const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+                            const sessionId = buffer.toString('base64');
+                            const message = `Here is your SESSION_ID:\n\n\`\`\`${sessionId}\`\`\``;
+                            await waBot.sendMessage(`${phoneNumber}@s.whatsapp.net`, { text: message });
+                            await bot.sendMessage(chatId, "Session ID has been sent to your WhatsApp.");
+                            cleanup();
+                         }
+                    });
+                } catch (error) {
+                     await bot.sendMessage(chatId, "Failed to request pairing code. The connection may have been blocked.");
+                     cleanup();
                 }
             }
 
             if (connection === 'close') {
-                console.log('Connection closed.', lastDisconnect?.error);
-                if (fs.existsSync(sessionDir)) {
-                    fs.rmSync(sessionDir, { recursive: true, force: true });
-                }
+                clearTimeout(connectionTimeout);
+                cleanup();
             }
         });
 
     } catch (error) {
         console.error("Pairing Error:", error);
         bot.sendMessage(chatId, "A critical error occurred. Please check the logs.");
-        if (fs.existsSync(sessionDir)) {
-            fs.rmSync(sessionDir, { recursive: true, force: true });
-        }
+        cleanup();
     }
 });
