@@ -21,7 +21,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // --- Baileys Global State Variables ---
 let sock = null; // Holds the Baileys socket instance
-let qrCodeData = null; // Stores the QR code string or pairing code string for display
+let qrCodeData = null; // Stores the 8-digit pairing code string for display
 let linkingInProgress = false; // Flag to manage the linking process state
 let currentPhoneNumber = null; // Stores the phone number entered by the user for pairing
 
@@ -87,12 +87,30 @@ async function startBaileys(phoneNumber = null) {
             currentPhoneNumber = null; // Clear phone number once successfully linked
         }
 
-        // The 'qr' property in connection.update will contain the linking data.
-        // For phone number pairing, this often is the 8-digit code string.
-        // We set it here as a fallback/initial display, but pairPhone() should return the definitive 8-digit code.
-        if (qr && !qrCodeData) { // Only set if qrCodeData hasn't been explicitly set by pairPhone() yet
-             console.log('Raw QR/Pairing Code received from connection.update event:', qr);
-             qrCodeData = qr; // Fallback: set qrCodeData to the raw `qr` string from the event
+        // --- NEW LOGIC FOR PAIRING CODE ---
+        // As per the article: request pairing code when 'connecting' or 'qr' is present.
+        // Ensure we only do this if a phone number was provided AND we're not already logged in.
+        if ((connection === "connecting" || !!qr) && phoneNumber && !sock.user) {
+            try {
+                // Ensure qrCodeData is not already set from a previous successful request
+                if (!qrCodeData) {
+                    console.log(`Requesting 8-digit pairing code for phone number: ${phoneNumber}`);
+                    // sock.requestPairingCode returns the 8-digit code
+                    const code = await sock.requestPairingCode(phoneNumber);
+                    console.log("Successfully received 8-digit pairing code:", code);
+                    qrCodeData = code; // Store the 8-digit code for display
+                }
+            } catch (e) {
+                console.error("Error requesting pairing code:", e);
+                qrCodeData = "Error generating pairing code. Please try again or check logs.";
+                linkingInProgress = false; // Allow a retry
+            }
+        } else if (qr && !qrCodeData && !phoneNumber) {
+             // Fallback for cases where `qr` is present but no phone number was used
+             // or `requestPairingCode` didn't succeed in setting `qrCodeData`.
+             // This might display the raw QR data.
+             console.log('Fallback: Raw QR/Pairing Code received from connection.update event:', qr);
+             qrCodeData = qr; // Display the raw `qr` string as a fallback
         }
     });
 
@@ -123,30 +141,7 @@ async function startBaileys(phoneNumber = null) {
         }
     });
 
-    console.log("Baileys socket instance created. Now attempting pairing/connection.");
-
-    // --- Execute pairPhone if a phone number is provided ---
-    // This needs to be called AFTER sock is initialized and event listeners are set up.
-    if (phoneNumber) {
-        console.log(`Attempting to explicitly pair with phone number: ${phoneNumber}`);
-        try {
-            // Explicitly check if sock.pairPhone is a function before calling
-            if (sock && typeof sock.pairPhone === 'function') {
-                const code = await sock.pairPhone(phoneNumber); // This should return the 8-digit code
-                console.log("Successfully generated 8-digit pairing code:", code);
-                qrCodeData = code; // Set the human-readable code for display
-            } else {
-                console.error("Error: sock.pairPhone is not a function. This might indicate a Baileys version issue.");
-                // Fallback: If pairPhone is not available, we rely solely on the `qr` event from connection.update.
-                // The `qrCodeData` would then contain the raw string from that event.
-                qrCodeData = "Could not generate 8-digit code. Please use the full code if displayed or check logs.";
-            }
-        } catch (e) {
-            console.error("Error during sock.pairPhone execution:", e);
-            linkingInProgress = false;
-            qrCodeData = "Error generating pairing code. Please try again or check logs. (Execution failed)";
-        }
-    }
+    console.log("Baileys socket instance created. Event listeners set up.");
 }
 
 // --- Express Routes ---
@@ -282,10 +277,11 @@ app.post('/link', async (req, res) => {
     }
 
     // Clean the phone number (remove non-digits)
-    currentPhoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+    // E.164 format without plus sign: e.g., 2348012345678
+    const cleanedPhoneNumber = phoneNumber.replace(/[^0-9]/g, '');
 
     // Start the Baileys connection with the provided phone number
-    await startBaileys(currentPhoneNumber);
+    await startBaileys(cleanedPhoneNumber);
 
     // Redirect to the GET /link page to display the code.
     res.send(`
@@ -300,7 +296,7 @@ app.post('/link', async (req, res) => {
         </head>
         <body>
             <h1>Generating Pairing Code...</h1>
-            <p>Please wait while the pairing code is generated for ${currentPhoneNumber}.</p>
+            <p>Please wait while the pairing code is generated for ${cleanedPhoneNumber}.</p>
             <p>You will be redirected in 5 seconds. If not, <a href="/link">click here</a>.</p>
         </body>
         </html>
@@ -311,7 +307,7 @@ app.post('/link', async (req, res) => {
 // --- Start the Express Server ---
 app.listen(port, () => {
     console.log(`Server listening on port ${port}`);
-    // IMPORTANT: Baileys connection is NOT started immediately here.
+    // Baileys connection is NOT started immediately here.
     // It will only start when a user visits and submits the form on the /link route.
     // However, if an existing session already exists from a previous successful link,
     // you might want to load it on startup to avoid re-linking.
