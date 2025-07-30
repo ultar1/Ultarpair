@@ -2,13 +2,12 @@
   "name": "my-baileys-bot",
   "version": "1.0.0",
   "description": "My WhatsApp Bot using Baileys",
-  "main": "index.js", // Or whatever your main bot file is named
+  "main": "index.js",
   "scripts": {
-    "start": "node index.js" // Command to start your bot
+    "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.x.x", // Use your installed version
-    // other dependencies
+    "@whiskeysockets/baileys": "^6.x.x", 
   },
-  "type": "module" // If you're using ES modules (import/export)
+  "type": "module" 
 }
