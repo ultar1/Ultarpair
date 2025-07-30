@@ -61,10 +61,10 @@ async function startBaileys(phoneNumber = null) {
             console.log('Connection closed. Reconnecting:', shouldReconnect);
             sock = null; // Clear the socket instance on close
 
-            if (shouldReconnect) {
-                console.log('Attempting to reconnect Baileys...');
-                // Recursively call startBaileys for reconnection
-                startBaileys(currentPhoneNumber); // Attempt to reconnect with the last used number
+                        if (shouldReconnect) {
+                console.log('Attempting to reconnect Baileys in 15 seconds...'); // Increased delay
+                setTimeout(() => startBaileys(currentPhoneNumber), 15000); // Try a longer delay
+
             } else {
                 console.log('Logged out. Please link again via /link.');
                 linkingInProgress = false; // Allow a new linking attempt
