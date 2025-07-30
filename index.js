@@ -63,7 +63,7 @@ async function startBaileys(phoneNumber = null) {
 
                         if (shouldReconnect) {
                 console.log('Attempting to reconnect Baileys in 15 seconds...'); // Increased delay
-                setTimeout(() => startBaileys(currentPhoneNumber), 15000); // Try a longer delay
+                setTimeout(() => startBaileys(currentPhoneNumber), 90000); // Try a longer delay
 
             } else {
                 console.log('Logged out. Please link again via /link.');
