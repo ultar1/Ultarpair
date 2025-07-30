@@ -1,4 +1,5 @@
-import makeWASocket, { DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys';
+import { makeWASocket, DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys';
+// Notice the 'makeWASocket' is now inside the curly braces {}
 import { Boom } from '@hapi/boom';
 import path from 'path'; // Import path module
 import { fileURLToPath } from 'url'; // If using ES modules
