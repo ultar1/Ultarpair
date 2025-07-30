@@ -1,128 +1,52 @@
-// index.js
-import express from 'express'
-import http from 'http'
-import { WebSocketServer } from 'ws'
-import { makeWASocket, DisconnectReason } from 'baileys'
-import { Boom } from '@hapi/boom'
-import QRCode from 'qrcode'
-import dotenv from 'dotenv'
-import logger from './logger.js'
-import { getSession, saveSession } from './db.js'
+import makeWASocket, { DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys';
+import { Boom } from '@hapi/boom';
+import path from 'path'; // Import path module
+import { fileURLToPath } from 'url'; // If using ES modules
 
-dotenv.config()
+// If using ES Modules (type: "module" in package.json)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-const SESSION_ID = 'default'
-const app = express()
-const server = http.createServer(app)
-const wss = new WebSocketServer({ server })
+// Define the path for session data to be stored on Render's persistent disk
+// This path will be where your Render Persistent Disk is mounted
+// We'll define this as an environment variable in Render later (e.g., WA_SESSION_PATH)
+const SESSION_PATH = process.env.WA_SESSION_PATH || path.resolve(__dirname, 'baileys_auth_info');
 
-let clients = []
 
-wss.on('connection', (ws) => {
-  clients.push(ws)
-  ws.on('close', () => {
-    clients = clients.filter(c => c !== ws)
-  })
-})
+async function connectToWhatsApp() {
+    // Use the defined SESSION_PATH for storing auth credentials
+    const { state, saveCreds } = await useMultiFileAuthState(SESSION_PATH);
 
-function broadcast(data) {
-  clients.forEach(ws => {
-    if (ws.readyState === ws.OPEN) {
-      ws.send(JSON.stringify(data))
-    }
-  })
-}
+    const sock = makeWASocket({
+        auth: state,
+        printQRInTerminal: true, // Crucial for initial setup (QR code in logs)
+        browser: ['My Baileys Bot', 'Chrome', '1.0'] // Custom browser name
+    });
 
-app.use(express.static('public'))
+    // ... (rest of your bot code, connection.update, messages.upsert, creds.update events)
 
-async function usePostgresAuthState() {
-  const session = await getSession(SESSION_ID)
-  const creds = session?.creds || {}
-  const keys = session?.keys || {}
-
-  return {
-    state: {
-      creds,
-      keys: {
-        get: async (type, ids) => {
-          const result = {}
-          for (const id of ids) {
-            result[id] = keys[type]?.[id]
-          }
-          return result
-        },
-        set: async (data) => {
-          for (const category in data) {
-            if (!keys[category]) keys[category] = {}
-            for (const id in data[category]) {
-              keys[category][id] = data[category][id]
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
+        if (connection === 'close') {
+            const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
+            console.log('Connection closed. Reconnecting:', shouldReconnect);
+            if (shouldReconnect) {
+                connectToWhatsApp();
+            } else {
+                console.log('Logged out. Please re-run the bot and scan QR again.');
+                // Handle a full logout scenario, maybe exit process or reset session
             }
-          }
+        } else if (connection === 'open') {
+            console.log('WhatsApp connection opened!');
         }
-      }
-    },
-    saveCreds: async () => {
-      await saveSession(SESSION_ID, creds, keys)
-    }
-  }
+    });
+
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        // Your message handling logic here
+        // ...
+    });
+
+    sock.ev.on('creds.update', saveCreds);
 }
 
-async function startSocket() {
-  const { state, saveCreds } = await usePostgresAuthState()
-
-  const sock = makeWASocket({
-    auth: state,
-    printQRInTerminal: false,
-    logger: logger.child({ module: 'baileys' }),
-    browser: ['CustomBot', 'Chrome', '1.0.0']
-  })
-
-  sock.ev.on('creds.update', saveCreds)
-
-  sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update
-
-    if (qr) {
-      try {
-        const qrImage = await QRCode.toDataURL(qr)
-        broadcast({ type: 'qr', data: qrImage })
-        logger.info('📡 QR code generated and sent to clients')
-      } catch (err) {
-        logger.error('❌ Failed to generate QR code:', err)
-      }
-    }
-
-    if (connection === 'open') {
-      logger.info('✅ WhatsApp connection established')
-      broadcast({ type: 'status', data: 'Connected to WhatsApp' })
-
-      const phoneNumber = '2348012345678'
-      try {
-        const code = await sock.requestPairingCode(phoneNumber)
-        broadcast({ type: 'pairing', data: code })
-        logger.info(`🔐 Pairing code generated: ${code}`)
-      } catch (err) {
-        logger.error('❌ Failed to generate pairing code:', err)
-      }
-    }
-
-    if (connection === 'close') {
-      const reason = new Boom(lastDisconnect?.error)?.output?.statusCode
-      const shouldReconnect = reason === DisconnectReason.restartRequired
-
-      if (shouldReconnect) {
-        logger.warn('🔄 Restart required. Reconnecting...')
-        startSocket()
-      } else {
-        logger.error(`❌ Connection closed with reason ${reason}`, lastDisconnect?.error)
-      }
-    }
-  })
-}
-
-startSocket()
-
-const PORT = process.env.PORT || 3000
-server.listen(PORT, () => {
-  logger.info(`🌐 Server running at http://localhost:${PORT}`)
-})
+connectToWhatsApp();
