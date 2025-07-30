@@ -1,18 +1,19 @@
 {
   "name": "my-baileys-bot",
   "version": "1.0.0",
-  "description": "My WhatsApp Bot using Baileys with web linking",
+  "description": "My WhatsApp Bot using Baileys with QR code linking",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.18", 
+    "@whiskeysockets/baileys": "6.5.7",
     "@hapi/boom": "^10.0.1",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "qrcode": "^1.5.3"
   },
   "type": "module",
   "engines": {
-    "node": ">=20.0.0" 
+    "node": ">=20.0.0"
   }
 }
