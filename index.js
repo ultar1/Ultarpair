@@ -6,18 +6,14 @@ import { fileURLToPath } from 'url';
 import fs from 'fs/promises'; // For file system operations, like deleting session data
 
 // --- Setup for ES Modules __dirname and __filename ---
-// These are needed to correctly resolve file paths in ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // --- Persistent Storage Path ---
-// This path corresponds to the Render Persistent Disk mount path you configured.
-// It will store your Baileys session credentials.
 const SESSION_PATH = process.env.WA_SESSION_PATH || path.resolve(__dirname, 'baileys_auth_info');
 
 // --- Express Server Setup ---
 const app = express();
-// Render automatically provides the PORT environment variable
 const port = process.env.PORT || 3000;
 
 // Middleware to parse URL-encoded bodies (for form submissions)
@@ -33,14 +29,17 @@ let currentPhoneNumber = null; // Stores the phone number entered by the user fo
 async function startBaileys(phoneNumber = null) {
     // Prevent multiple linking attempts if one is already in progress
     if (linkingInProgress && sock) {
-        console.log("Linking process already in progress or bot is connected.");
         if (sock.ws.readyState === sock.ws.OPEN) {
-            return; // If already open, do nothing
+            console.log("Bot already connected and active.");
+            return;
         }
+        console.log("Linking process already in progress. Waiting for previous attempt to resolve.");
+        return; // Don't start a new process if one is ongoing
     }
 
     linkingInProgress = true;
     qrCodeData = null; // Clear any old code when starting a new linking attempt
+    currentPhoneNumber = phoneNumber; // Store the number for potential re-use
 
     // Load or create authentication state for Baileys
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_PATH);
@@ -48,29 +47,25 @@ async function startBaileys(phoneNumber = null) {
     // Create a new Baileys WhatsApp Socket instance
     sock = makeWASocket({
         auth: state,
-        // printQRInTerminal is deprecated and removed as per previous discussions
         browser: ['My Baileys Bot', 'Chrome', '1.0'] // Custom browser identifier
     });
 
-    // --- Baileys Event Listeners ---
+    // --- Baileys Event Listeners (Set up immediately) ---
 
     // Listen for connection updates (open, close, QR/pairing code)
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
         if (connection === 'close') {
-            // Determine if reconnection is needed or if it's a full logout
             const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
             console.log('Connection closed. Reconnecting:', shouldReconnect);
             sock = null; // Clear the socket instance on close
 
             if (shouldReconnect) {
-                // If it's a transient disconnect, retry connection
                 console.log('Attempting to reconnect Baileys...');
-                // Reuse the phone number if available for a seamless reconnection attempt
-                startBaileys(currentPhoneNumber);
+                // Recursively call startBaileys for reconnection
+                startBaileys(currentPhoneNumber); // Attempt to reconnect with the last used number
             } else {
-                // If logged out, indicate need for new link and clean up session data
                 console.log('Logged out. Please link again via /link.');
                 linkingInProgress = false; // Allow a new linking attempt
                 qrCodeData = null; // Clear any old QR/pairing code
@@ -92,37 +87,17 @@ async function startBaileys(phoneNumber = null) {
             currentPhoneNumber = null; // Clear phone number once successfully linked
         }
 
-        // The 'qr' property will contain the QR code string or the pairing code string
-        if (qr) {
-            console.log('QR/Pairing Code received:', qr);
-            qrCodeData = qr; // Store the code for web display
+        // The 'qr' property in connection.update will contain the linking data.
+        // For phone number pairing, this often is the 8-digit code string.
+        // We set it here as a fallback/initial display, but pairPhone() should return the definitive 8-digit code.
+        if (qr && !qrCodeData) { // Only set if qrCodeData hasn't been explicitly set by pairPhone() yet
+             console.log('Raw QR/Pairing Code received from connection.update event:', qr);
+             qrCodeData = qr; // Fallback: set qrCodeData to the raw `qr` string from the event
         }
     });
 
     // Save credentials when they are updated (essential for session persistence)
     sock.ev.on('creds.update', saveCreds);
-
-    // --- Initiate Pairing if Phone Number is Provided ---
-    if (phoneNumber) {
-        console.log(`Attempting to pair with phone number: ${phoneNumber}`);
-        try {
-            // sock.pairPhone() is the method for phone number pairing
-            // This method might trigger the 'qr' event with the pairing code.
-            const code = await sock.pairPhone(phoneNumber);
-            console.log("Pairing code from pairPhone:", code);
-            // Ensure qrCodeData is updated, in case the event fires too late or not at all for this method.
-            if (code) {
-                qrCodeData = code;
-            }
-        } catch (e) {
-            console.error("Error during pairPhone:", e);
-            linkingInProgress = false; // Reset linking state on error
-            qrCodeData = "Error generating pairing code. Please try again or check logs.";
-        }
-    } else {
-        console.log("No phone number provided, waiting for /link POST or existing session.");
-    }
-
 
     // --- Message Handling Logic (Automatic Deletion) ---
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
@@ -148,7 +123,30 @@ async function startBaileys(phoneNumber = null) {
         }
     });
 
-    console.log("Baileys connection attempt initiated.");
+    console.log("Baileys socket instance created. Now attempting pairing/connection.");
+
+    // --- Execute pairPhone if a phone number is provided ---
+    // This needs to be called AFTER sock is initialized and event listeners are set up.
+    if (phoneNumber) {
+        console.log(`Attempting to explicitly pair with phone number: ${phoneNumber}`);
+        try {
+            // Explicitly check if sock.pairPhone is a function before calling
+            if (sock && typeof sock.pairPhone === 'function') {
+                const code = await sock.pairPhone(phoneNumber); // This should return the 8-digit code
+                console.log("Successfully generated 8-digit pairing code:", code);
+                qrCodeData = code; // Set the human-readable code for display
+            } else {
+                console.error("Error: sock.pairPhone is not a function. This might indicate a Baileys version issue.");
+                // Fallback: If pairPhone is not available, we rely solely on the `qr` event from connection.update.
+                // The `qrCodeData` would then contain the raw string from that event.
+                qrCodeData = "Could not generate 8-digit code. Please use the full code if displayed or check logs.";
+            }
+        } catch (e) {
+            console.error("Error during sock.pairPhone execution:", e);
+            linkingInProgress = false;
+            qrCodeData = "Error generating pairing code. Please try again or check logs. (Execution failed)";
+        }
+    }
 }
 
 // --- Express Routes ---
@@ -289,8 +287,7 @@ app.post('/link', async (req, res) => {
     // Start the Baileys connection with the provided phone number
     await startBaileys(currentPhoneNumber);
 
-    // Redirect back to the GET /link page to display the code.
-    // We use a meta refresh to allow the code to be generated.
+    // Redirect to the GET /link page to display the code.
     res.send(`
         <!DOCTYPE html>
         <html>
@@ -318,9 +315,5 @@ app.listen(port, () => {
     // It will only start when a user visits and submits the form on the /link route.
     // However, if an existing session already exists from a previous successful link,
     // you might want to load it on startup to avoid re-linking.
-    // For this version, it waits for user interaction or a successful POST to /link.
-    // If you want it to attempt to reconnect with an *existing* session on startup,
-    // you would add a check here to call startBaileys() without a phone number
-    // if SESSION_PATH contains valid credentials.
     // For now, it will solely rely on the web interface for initial linking.
 });
