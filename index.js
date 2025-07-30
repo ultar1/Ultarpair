@@ -17,14 +17,13 @@ const SESSION_PATH = process.env.WA_SESSION_PATH || path.resolve(__dirname, 'bai
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware to parse URL-encoded bodies (not strictly needed for QR, but kept for consistency)
 app.use(express.urlencoded({ extended: true }));
 
 // --- Baileys Global State Variables ---
 let sock = null;
-let qrCodeData = null; // This will now hold a base64 encoded QR code image
+let qrCodeData = null;
 let linkingInProgress = false;
-let currentPhoneNumber = null; // No longer needed for QR, but kept for future use if needed
+let currentPhoneNumber = null;
 
 // --- Function to Start/Manage Baileys Connection ---
 async function startBaileys() {
@@ -75,14 +74,11 @@ async function startBaileys() {
             qrCodeData = null;
         }
 
-        // --- NEW QR CODE LOGIC ---
-        // When Baileys sends a QR code string, generate an image and store it.
         if (qr) {
             console.log('QR Code received from connection.update event.');
             try {
-                // Generate a base64-encoded QR code image from the raw QR string
                 const qrImage = await qrcode.toDataURL(qr, { type: 'image/png' });
-                qrCodeData = qrImage; // Store the image data for the web page
+                qrCodeData = qrImage;
                 console.log('Generated QR code image for display.');
             } catch (e) {
                 console.error("Error generating QR code:", e);
@@ -118,7 +114,7 @@ async function startBaileys() {
 
 // --- Express Routes ---
 
-// Route for the basic homepage
+// Route for the basic homepage with a button to trigger QR generation
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -129,22 +125,31 @@ app.get('/', (req, res) => {
                 body { font-family: sans-serif; text-align: center; padding: 50px; }
                 h1 { color: #333; }
                 p { color: #666; }
-                a { color: #007bff; text-decoration: none; }
-                a:hover { text-decoration: underline; }
+                a.button {
+                    display: inline-block;
+                    background-color: #28a745;
+                    color: white;
+                    padding: 15px 30px;
+                    text-decoration: none;
+                    border-radius: 5px;
+                    font-size: 1.2em;
+                    margin-top: 20px;
+                }
+                a.button:hover { background-color: #218838; }
             </style>
         </head>
         <body>
             <h1>WhatsApp Bot Running</h1>
-            <p>This is your Baileys bot service.</p>
-            <p>Visit <a href="/link">/link</a> to connect your WhatsApp account.</p>
+            <p>Your bot is active, but not yet linked to an account.</p>
+            <a class="button" href="/link">Tap to Generate QR Code</a>
         </body>
         </html>
     `);
 });
 
-// GET /link: Displays the QR code linking page
+// GET /link: Displays the QR code after being triggered by the button
 app.get('/link', (req, res) => {
-    // Start the Baileys connection process if it's not already running
+    // Start the Baileys connection process ONLY when this page is visited
     if (!linkingInProgress && !sock) {
         startBaileys();
     }
@@ -170,7 +175,6 @@ app.get('/link', (req, res) => {
     }
 
     if (linkingInProgress && qrCodeData) {
-        // If the QR code is generated, display it
         return res.send(`
             <!DOCTYPE html>
             <html>
@@ -193,7 +197,6 @@ app.get('/link', (req, res) => {
             </html>
         `);
     } else {
-        // If not connected and no QR code yet, show a waiting message
         return res.send(`
             <!DOCTYPE html>
             <html>
@@ -218,7 +221,5 @@ app.get('/link', (req, res) => {
 // --- Start the Express Server ---
 app.listen(port, () => {
     console.log(`Server listening on port ${port}`);
-    // Start Baileys connection on server start so the QR is ready when the user visits /link
-    // This removes the need for the user to refresh multiple times.
-    startBaileys();
+    // IMPORTANT: startBaileys() is NOT called here. It will only be triggered by the user's click.
 });
