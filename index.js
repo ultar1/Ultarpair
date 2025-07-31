@@ -4,7 +4,7 @@ import { Boom } from '@hapi/boom';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
-import qrcode from 'qrcode'; // Import the qrcode library
+import qrcode from 'qrcode';
 
 // --- Setup for ES Modules __dirname and __filename ---
 const __filename = fileURLToPath(import.meta.url);
@@ -23,7 +23,6 @@ app.use(express.urlencoded({ extended: true }));
 let sock = null;
 let qrCodeData = null;
 let linkingInProgress = false;
-let currentPhoneNumber = null;
 
 // --- Function to Start/Manage Baileys Connection ---
 async function startBaileys() {
@@ -41,9 +40,15 @@ async function startBaileys() {
 
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_PATH);
 
+    // --- CRITICAL FIX: Updated the version string for compatibility ---
+    const version = [2, 3000, 1023223821];
+
     sock = makeWASocket({
         auth: state,
-        browser: ['My Baileys Bot', 'Chrome', '1.0']
+        // The version string is now explicitly set for stability
+        version: version, 
+        // The browser option can be omitted or updated if needed, but this version property is more direct
+        browser: ['My Baileys Bot', 'Chrome', '1.0'] 
     });
 
     sock.ev.on('connection.update', async (update) => {
@@ -56,7 +61,7 @@ async function startBaileys() {
 
             if (shouldReconnect) {
                 console.log('Attempting to reconnect Baileys in 30 seconds...');
-                setTimeout(() => startBaileys(), 30000); // Use a long delay to avoid flagging
+                setTimeout(() => startBaileys(), 30000);
             } else {
                 console.log('Logged out. Please link again via /link.');
                 linkingInProgress = false;
@@ -114,7 +119,6 @@ async function startBaileys() {
 
 // --- Express Routes ---
 
-// Route for the basic homepage with a button to trigger QR generation
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -147,9 +151,7 @@ app.get('/', (req, res) => {
     `);
 });
 
-// GET /link: Displays the QR code after being triggered by the button
 app.get('/link', (req, res) => {
-    // Start the Baileys connection process ONLY when this page is visited
     if (!linkingInProgress && !sock) {
         startBaileys();
     }
@@ -218,8 +220,7 @@ app.get('/link', (req, res) => {
 });
 
 
-// --- Start the Express Server ---
 app.listen(port, () => {
     console.log(`Server listening on port ${port}`);
-    // IMPORTANT: startBaileys() is NOT called here. It will only be triggered by the user's click.
+    startBaileys();
 });
