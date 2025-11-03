@@ -1,6 +1,7 @@
 import logging
 import html
-from telegram import Update, ParseMode
+from telegram import Update
+from telegram.constants import ParseMode  # <--- THIS IS THE CORRECT IMPORT
 from telegram.ext import ContextTypes
 from database import add_to_blacklist, remove_from_blacklist, get_blacklist
 import config
@@ -19,11 +20,6 @@ async def is_admin(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
     # 2. If not, check if they are an admin of the group
     # This part is more complex and requires checking chat admins.
     # For now, we will stick to Super Admins for private commands.
-    # In a group chat, you would use:
-    # chat_id = update.message.chat_id
-    # admins = await context.bot.get_chat_administrators(chat_id)
-    # if user_id in [admin.user.id for admin in admins]:
-    #     return True
         
     return False
 
@@ -55,7 +51,7 @@ async def add_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TY
     term = " ".join(context.args).lower()
     
     try:
-        if add_to_blacklist(term):
+        if add_to_.blacklist(term):
             await update.message.reply_text(f"✅ Added '{term}' to the blacklist.")
         else:
             await update.message.reply_text(f"'{term}' is already on the blacklist.")
@@ -100,7 +96,6 @@ async def list_blacklist_command(update: Update, context: ContextTypes.DEFAULT_T
             await update.message.reply_text("The blacklist is currently empty.")
             return
 
-        # --- THIS IS THE FIX ---
         # 1. We build an HTML message
         message = "<b>Current Blacklisted Terms:</b>\n\n"
         
@@ -111,7 +106,6 @@ async def list_blacklist_command(update: Update, context: ContextTypes.DEFAULT_T
 
         # 3. We explicitly send as HTML
         await update.message.reply_text(message, parse_mode=ParseMode.HTML)
-        # ---------------------
         
     except Exception as e:
         logger.error(f"Error in list_blacklist_command: {e}")
