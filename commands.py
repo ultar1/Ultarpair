@@ -1,7 +1,8 @@
 import logging
 import html
+import asyncio  # <-- You MUST import this
 from telegram import Update
-from telegram.constants import ParseMode  # <--- THIS IS THE CORRECT IMPORT
+from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 from database import add_to_blacklist, remove_from_blacklist, get_blacklist
 import config
@@ -51,7 +52,10 @@ async def add_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TY
     term = " ".join(context.args).lower()
     
     try:
-        if add_to_.blacklist(term):
+        # --- FIX: 1) Typo removed, 2) Wrapped in async thread ---
+        success = await asyncio.to_thread(add_to_blacklist, term)
+        
+        if success:
             await update.message.reply_text(f"✅ Added '{term}' to the blacklist.")
         else:
             await update.message.reply_text(f"'{term}' is already on the blacklist.")
@@ -74,7 +78,10 @@ async def remove_blacklist_command(update: Update, context: ContextTypes.DEFAULT
     term = " ".join(context.args).lower()
     
     try:
-        if remove_from_blacklist(term):
+        # --- FIX: Wrapped in async thread ---
+        success = await asyncio.to_thread(remove_from_blacklist, term)
+        
+        if success:
             await update.message.reply_text(f"✅ Removed '{term}' from the blacklist.")
         else:
             await update.message.reply_text(f"'{term}' was not found on the blacklist.")
@@ -91,22 +98,22 @@ async def list_blacklist_command(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     try:
-        terms = get_blacklist()
+        # --- FIX: Wrapped in async thread ---
+        terms = await asyncio.to_thread(get_blacklist)
+        
         if not terms:
             await update.message.reply_text("The blacklist is currently empty.")
             return
 
-        # 1. We build an HTML message
         message = "<b>Current Blacklisted Terms:</b>\n\n"
-        
-        # 2. We loop through terms and escape them to prevent errors
         for term in terms:
-            escaped_term = html.escape(term)
-            message += f"• <code>{escaped_term}</code>\n"
+            escaped_term = html.escape(str(term)) # Use str(term) just in case
+            message += f"• Example: `lilian`
+message += f"• <code>{escaped_term}</code>\n"
 
-        # 3. We explicitly send as HTML
         await update.message.reply_text(message, parse_mode=ParseMode.HTML)
         
     except Exception as e:
         logger.error(f"Error in list_blacklist_command: {e}")
         await update.message.reply_text("An error occurred while fetching the blacklist.")
+
