@@ -9,7 +9,7 @@ from telegram.ext import (
     ChatMemberHandler,
     ContextTypes,
 )
-from asgiref.wsgi import WsgiToAsgi # <--- Translator
+from asgiref.wsgi import WsgiToAsgi # This is the translator
 
 # Import config (which loads env vars) and database functions
 import config
@@ -31,39 +31,41 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- Initialize Flask App and Telegram Application ---
-flask_app = Flask(__name__) # <--- Renamed to 'flask_app'
+flask_app = Flask(__name__) # Renamed to 'flask_app'
 
 # Build the Telegram Application
-# We build it here so both our setup and webhook handler can use it
 try:
     application = Application.builder().token(config.TOKEN).build()
     logger.info("Telegram Application built successfully.")
 except Exception as e:
     logger.critical(f"Failed to build Telegram Application: {e}")
-    # If we can't build the app, nothing else will work
     exit(1)
 
 
 # --- Bot Setup ---
 async def setup_bot():
-    """Initializes DB, sets handlers, and sets the webhook."""
+    """Initializes DB, handlers, the application, and the webhook."""
     logger.info("Initializing database...")
     init_db()
     
     logger.info("Registering handlers...")
-    # Register all your command and member handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("addblacklist", add_blacklist_command))
     application.add_handler(CommandHandler("removeblacklist", remove_blacklist_command))
     application.add_handler(CommandHandler("listblacklist", list_blacklist_command))
     application.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
 
+    # --- THIS IS THE NEW FIX ---
+    # We must initialize the app inside the async loop
+    logger.info("Initializing Telegram Application...")
+    await application.initialize()
+    # -------------------------
+
     # Tell Telegram where to send updates (our webhook URL)
     try:
         webhook_url = f"{config.WEBHOOK_URL}/webhook"
         logger.info(f"Setting webhook to: {webhook_url}")
         
-        # We have removed the secret_token from this call
         await application.bot.set_webhook(
             url=webhook_url
         )
@@ -81,30 +83,25 @@ def health_check():
 @flask_app.route('/webhook', methods=['POST'])
 async def telegram_webhook():
     """Handles incoming updates from Telegram."""
-    
-    # 1. We have removed the secret token check.
         
     try:
-        # 2. Get the JSON data from Telegram
-        # THIS IS THE CORRECTED LINE
+        # --- THIS IS THE OTHER FIX ---
+        # We removed 'await' from this line
         data = request.get_json()
+        # ---------------------------
         
-        # 3. Create an Update object
         update = Update.de_json(data, application.bot)
         
-        # 4. Process the update (this runs your command/moderation handlers)
         await application.process_update(update)
         
         return "ok", 200
         
     except Exception as e:
-        # We log the *actual* error, not the 'await' error
         logger.error(f"Error handling webhook: {e}")
         return "error", 500
 
 # --- Setup on Gunicorn Start ---
-
-# Check for required env vars *before* trying to run setup
+# This code runs ONCE when your Gunicorn worker starts.
 if not config.TOKEN:
     logger.critical("!!! ERROR: BOT_TOKEN is not set. !!!")
 elif not config.DATABASE_URL:
@@ -115,14 +112,12 @@ else:
     logger.info("All environment variables seem to be set.")
     logger.info("Running async setup to set webhook...")
     try:
+        # This runs our setup_bot() function
         asyncio.run(setup_bot())
         logger.info("Async setup complete. Ready for Gunicorn.")
     except Exception as e:
         logger.critical(f"Failed to run async setup: {e}")
 
-# 4. WRAP THE APP
+# --- WRAP THE APP ---
 # This is the translator that fixes the server crash.
 app = WsgiToAsgi(flask_app)
-
-# DO NOT ADD app.run() or if __name__ == '__main__':
-# Gunicorn will manage the server.
