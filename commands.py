@@ -1,17 +1,16 @@
 import logging
 from telegram import Update
-from telegram.ext import CallbackContext
+# Import the new ContextTypes
+from telegram.ext import CallbackContext, ContextTypes
 import database
-from config import ADMIN_IDS_SET  # <-- Import the new Super Admin set
+from config import ADMIN_IDS_SET
 
 logger = logging.getLogger(__name__)
 
-def is_admin(update: Update, context: CallbackContext) -> bool:
+# This function must now be ASYNC
+async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """
     Checks if a user is authorized to run an admin command.
-    Returns True if:
-    1. The user's ID is in the ADMIN_IDS_SET (Super-Admin, can use in private chat).
-    2. The user is an 'administrator' or 'creator' of the group (Group-Admin, can only use in the group).
     """
     if not update.effective_user:
         return False  # Cannot identify user
@@ -23,26 +22,26 @@ def is_admin(update: Update, context: CallbackContext) -> bool:
         return True
 
     # 2. If not Super-Admin, check if they are in a private chat.
-    # At this point, only Super-Admins can use private chat.
     if update.effective_chat.type == 'private':
         return False
 
     # 3. If in a group, check if they are a Group-Admin
     try:
-        member = context.bot.get_chat_member(
+        # This bot call must now be AWAITED
+        member = await context.bot.get_chat_member(
             chat_id=update.effective_chat.id,
             user_id=user_id
         )
         is_group_admin = member.status in ('administrator', 'creator')
         return is_group_admin
     except Exception as e:
-        # This can fail if bot is not in the group or has no perms
         logger.warning(f"Could not check admin status for {user_id} in chat {update.effective_chat.id}: {e}")
         return False
 
-# --- Command Handlers (No changes below, they just use is_admin) ---
+# --- Command Handlers ---
+# All handlers are now 'async def' and use 'await'
 
-def start_command(update: Update, context: CallbackContext):
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Sends a welcome message."""
     start_message = (
         "👋 Hi! I am a moderation bot.\n"
@@ -54,57 +53,58 @@ def start_command(update: Update, context: CallbackContext):
         "Group admins can use these commands in the group. "
         "Super-Admins (from .env) can also use them in this private chat."
     )
-    update.message.reply_text(start_message)
+    await update.message.reply_text(start_message)
 
-def add_blacklist_command(update: Update, context: CallbackContext):
+async def add_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Adds a term to the blacklist database."""
-    if not is_admin(update, context):
-        update.message.reply_text("❌ Sorry, this command is for admins only.")
+    # We must 'await' the async is_admin function
+    if not await is_admin(update, context):
+        await update.message.reply_text("❌ Sorry, this command is for admins only.")
         return
 
     if not context.args:
-        update.message.reply_text("Usage: /addblacklist <term_to_block>")
+        await update.message.reply_text("Usage: /addblacklist <term_to_block>")
         return
 
     term_to_add = " ".join(context.args).lower()
     
     if database.add_to_blacklist(term_to_add):
-        update.message.reply_text(f"✅ Added '{term_to_add}' to the blacklist.")
+        await update.message.reply_text(f"✅ Added '{term_to_add}' to the blacklist.")
     else:
-        update.message.reply_text(f"⚠️ '{term_to_add}' is already on the blacklist or an error occurred.")
+        await update.message.reply_text(f"⚠️ '{term_to_add}' is already on the blacklist or an error occurred.")
 
-def remove_blacklist_command(update: Update, context: CallbackContext):
+async def remove_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Removes a term from the blacklist database."""
-    if not is_admin(update, context):
-        update.message.reply_text("❌ Sorry, this command is for admins only.")
+    if not await is_admin(update, context):
+        await update.message.reply_text("❌ Sorry, this command is for admins only.")
         return
 
     if not context.args:
-        update.message.reply_text("Usage: /removeblacklist <term_to_remove>")
+        await update.message.reply_text("Usage: /removeblacklist <term_to_remove>")
         return
 
     term_to_remove = " ".join(context.args).lower()
 
     if database.remove_from_blacklist(term_to_remove):
-        update.message.reply_text(f"🗑️ Removed '{term_to_remove}' from the blacklist.")
+        await update.message.reply_text(f"🗑️ Removed '{term_to_remove}' from the blacklist.")
     else:
-        update.message.reply_text(f"⚠️ '{term_to_remove}' was not found on the blacklist.")
+        await update.message.reply_text(f"⚠️ '{term_to_remove}' was not found on the blacklist.")
 
-def list_blacklist_command(update: Update, context: CallbackContext):
+async def list_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Lists all terms on the blacklist from the database."""
-    if not is_admin(update, context):
-        update.message.reply_text("❌ Sorry, this command is for admins only.")
+    if not await is_admin(update, context):
+        await update.message.reply_text("❌ Sorry, this command is for admins only.")
         return
 
     blacklist = database.get_blacklist()
     if not blacklist:
-        update.message.reply_text("📋 The blacklist is currently empty.")
+        await update.message.reply_text("📋 The blacklist is currently empty.")
         return
 
     message = "Current blacklist:\n"
-    # Need to escape characters for MarkdownV2
     for term in sorted(list(blacklist)):
+        # Escape markdown characters
         escaped_term = term.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]').replace('(', '\\(').replace(')', '\\)').replace('~', '\\~').replace('`', '\\`').replace('>', '\\>').replace('#', '\\#').replace('+', '\\+').replace('-', '\\-').replace('=', '\\=').replace('|', '\\|').replace('{', '\\{').replace('}', '\\}').replace('.', '\\.').replace('!', '\\!')
         message += f"- `{escaped_term}`\n"
     
-    update.message.reply_text(message, parse_mode='MarkdownV2')
+    await update.message.reply_text(message, parse_mode='MarkdownV2')
