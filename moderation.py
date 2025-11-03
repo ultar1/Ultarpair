@@ -1,8 +1,10 @@
 import logging
+import html
+import asyncio  # <-- You MUST import this
 from telegram import Update
-# Import the new ContextTypes
 from telegram.ext import CallbackContext, ContextTypes
 import database 
+from telegram.constants import ParseMode # Import for formatting the error message
 
 logger = logging.getLogger(__name__)
 
@@ -41,22 +43,31 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_full_text = " ".join(text_to_check)
     
-    blacklist = database.get_blacklist()
+    try:
+        # --- THIS IS THE FIX ---
+        # Call the blocking DB function in a separate thread
+        blacklist = await asyncio.to_thread(database.get_blacklist)
+    
+    except Exception as e:
+        logger.error(f"Failed to get blacklist during new member check: {e}")
+        return # Cannot check user if database fails
     
     if not blacklist:
         return # Nothing to check against
 
     for blocked_term in blacklist:
+        # 'blocked_term' should already be lowercase from your add_blacklist command
         if blocked_term in user_full_text:
             logger.info(f"MATCH: User '{user_full_text}' matches term '{blocked_term}'")
             try:
                 # KICK THE USER! (must be AWAITED)
-                await context.bot.kick_chat_member(chat_id=chat_id, user_id=user.id)
+                await context.bot.ban_chat_member(chat_id=chat_id, user_id=user.id)
                 
                 # Send message (must be AWAITED)
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text=f"Removed user {user.full_name} for matching a blacklisted term."
+                    text=f"Removed user {html.escape(user.full_name)} for matching a blacklisted term.",
+                    parse_mode=ParseMode.HTML
                 )
                 logger.info(f"Successfully kicked user {user.id}")
                 return
@@ -66,7 +77,10 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Send message (must be AWAITED)
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text=f"⚠️ **Action Failed!** ⚠️\nUser {user.full_name} matches the blacklist, but I could not remove them. "
-                         "Please make sure I am an admin with 'Ban users' permission."
+                    text=f"⚠️ <b>Action Failed!</b> ⚠️\n"
+                         f"User {html.escape(user.full_name)} matches the blacklist, but I could not remove them. "
+                         "Please make sure I am an admin with 'Ban users' permission.",
+                    parse_mode=ParseMode.HTML
                 )
                 return
+
