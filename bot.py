@@ -1,4 +1,7 @@
 import logging
+import os
+from threading import Thread
+from flask import Flask
 from telegram.ext import (
     Updater,
     CommandHandler,
@@ -24,8 +27,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# --- NEW: Health Check Web Server ---
+# Render's Web Service needs a port to bind to.
+# This simple Flask app runs in a thread to respond to health checks.
+
+app = Flask(__name__)
+@app.route('/')
+def health_check():
+    """Responds to Render's health check."""
+    return "Bot is alive!", 200
+
+def run_web_server():
+    """Runs the Flask web server."""
+    # Get the port from Render's environment variable
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
+
+# --- End of Web Server Code ---
+
+
 def main():
-    """Start the bot."""
+    """Start the bot and the web server."""
     
     # 1. Check for essential environment variables
     if not config.TOKEN:
@@ -36,7 +58,7 @@ def main():
         logger.critical("!!! ERROR: DATABASE_URL environment variable not set. !!!")
         return
 
-    # 2. Initialize the database (create tables if they don't exist)
+    # 2. Initialize the database
     try:
         init_db()
         logger.info("Database connection established and tables checked.")
@@ -44,26 +66,30 @@ def main():
         logger.critical(f"!!! CRITICAL: Could not connect to database. {e} !!!")
         return
 
-    # 3. Create the Updater and pass it your bot's token.
+    # 3. --- NEW: Start the health check web server in a background thread ---
+    logger.info("Starting health check web server...")
+    # The `daemon=True` flag means this thread will stop when the main script stops
+    web_thread = Thread(target=run_web_server, daemon=True)
+    web_thread.start()
+    logger.info("Web server started.")
+
+    # 4. Create the Updater and pass it your bot's token.
     updater = Updater(config.TOKEN)
 
-    # 4. Get the dispatcher to register handlers
+    # 5. Get the dispatcher to register handlers
     dispatcher = updater.dispatcher
-
-    # --- Register Command Handlers ---
     dispatcher.add_handler(CommandHandler("start", start_command))
     dispatcher.add_handler(CommandHandler("addblacklist", add_blacklist_command))
     dispatcher.add_handler(CommandHandler("removeblacklist", remove_blacklist_command))
     dispatcher.add_handler(CommandHandler("listblacklist", list_blacklist_command))
-
-    # --- Register New Member Handler ---
     dispatcher.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
 
-    # 5. Start the Bot
+    # 6. Start the Bot
     updater.start_polling()
     logger.info("Bot started and polling...")
 
-    # Run the bot until you press Ctrl-C
+    # 7. Run the bot until you press Ctrl-C
+    # The script will now idle here, while the web server runs in its thread.
     updater.idle()
 
 if __name__ == '__main__':
