@@ -24,11 +24,17 @@ if admin_ids_str:
         logger.error("Error: ADMIN_IDS contains invalid (non-numeric) values.")
         ADMIN_IDS_SET = set()
 
-# --- NEW: Webhook Configuration ---
+# --- Webhook Configuration (THE FIX) ---
 
-# This is the public URL of your Render web service
-# Render sets this automatically as 'RENDER_EXTERNAL_URL'
-WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL")
+# We are hardcoding your production URL as requested.
+# This is more reliable than using the environment variable.
+WEBHOOK_URL = "https://ultarpair.onrender.com"
 
 # This is a random string you create to make your webhook secure
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
+
+# Log the loaded URL to confirm
+if WEBHOOK_URL:
+    logger.info(f"Webhook URL is set to: {WEBHOOK_URL}")
+else:
+    logger.error("!!! ERROR: WEBHOOK_URL is not set. !!!")
