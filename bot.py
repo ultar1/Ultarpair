@@ -1,9 +1,10 @@
 import logging
 import os
+import asyncio
 from threading import Thread
 from flask import Flask
 from telegram.ext import (
-    Updater,
+    Application,
     CommandHandler,
     ChatMemberHandler,
 )
@@ -27,10 +28,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- NEW: Health Check Web Server ---
-# Render's Web Service needs a port to bind to.
-# This simple Flask app runs in a thread to respond to health checks.
-
+# --- Health Check Web Server (Unchanged) ---
 app = Flask(__name__)
 @app.route('/')
 def health_check():
@@ -39,10 +37,8 @@ def health_check():
 
 def run_web_server():
     """Runs the Flask web server."""
-    # Get the port from Render's environment variable
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
-
 # --- End of Web Server Code ---
 
 
@@ -66,31 +62,30 @@ def main():
         logger.critical(f"!!! CRITICAL: Could not connect to database. {e} !!!")
         return
 
-    # 3. --- NEW: Start the health check web server in a background thread ---
+    # 3. Start the health check web server in a background thread
     logger.info("Starting health check web server...")
-    # The `daemon=True` flag means this thread will stop when the main script stops
     web_thread = Thread(target=run_web_server, daemon=True)
     web_thread.start()
     logger.info("Web server started.")
 
-    # 4. Create the Updater and pass it your bot's token.
-    updater = Updater(config.TOKEN)
+    # 4. --- THIS IS THE FIX ---
+    # Use Application.builder() instead of Updater()
+    logger.info("Building Telegram application...")
+    application = Application.builder().token(config.TOKEN).build()
+    logger.info("Application built.")
 
-    # 5. Get the dispatcher to register handlers
-    dispatcher = updater.dispatcher
-    dispatcher.add_handler(CommandHandler("start", start_command))
-    dispatcher.add_handler(CommandHandler("addblacklist", add_blacklist_command))
-    dispatcher.add_handler(CommandHandler("removeblacklist", remove_blacklist_command))
-    dispatcher.add_handler(CommandHandler("listblacklist", list_blacklist_command))
-    dispatcher.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
+    # 5. Get the dispatcher to register handlers (now from 'application')
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("addblacklist", add_blacklist_command))
+    application.add_handler(CommandHandler("removeblacklist", remove_blacklist_command))
+    application.add_handler(CommandHandler("listblacklist", list_blacklist_command))
+    application.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
 
     # 6. Start the Bot
-    updater.start_polling()
+    # This call is now 'run_polling()' and it's blocking,
+    # which is fine since the web server is in another thread.
     logger.info("Bot started and polling...")
-
-    # 7. Run the bot until you press Ctrl-C
-    # The script will now idle here, while the web server runs in its thread.
-    updater.idle()
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
