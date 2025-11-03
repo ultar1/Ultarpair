@@ -12,20 +12,23 @@ TOKEN = os.environ.get("BOT_TOKEN")
 # Get the PostgreSQL database URL from environment variables
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# --- NEW: Load Super Admins from .env ---
+# --- Load Super Admins (Unchanged) ---
 admin_ids_str = os.environ.get("ADMIN_IDS", "")
 ADMIN_IDS_SET = set()
-
-if not admin_ids_str:
-    logger.warning("ADMIN_IDS environment variable is not set. Only group admins will be able to use commands (and only in groups).")
-else:
+if admin_ids_str:
     try:
-        # Parse the comma-separated string into a set of integers
         ADMIN_IDS_SET = set(int(admin_id.strip()) for admin_id in admin_ids_str.split(',') if admin_id.strip().isdigit())
         if ADMIN_IDS_SET:
-            logger.info(f"Loaded {len(ADMIN_IDS_SET)} Super Admin(s) from .env file.")
-        else:
-             logger.warning("ADMIN_IDS variable is empty or contains no valid IDs.")
+            logger.info(f"Loaded {len(ADMIN_IDS_SET)} Super Admin(s).")
     except ValueError:
-        logger.error("Error: ADMIN_IDS contains invalid (non-numeric) values. Please check .env")
+        logger.error("Error: ADMIN_IDS contains invalid (non-numeric) values.")
         ADMIN_IDS_SET = set()
+
+# --- NEW: Webhook Configuration ---
+
+# This is the public URL of your Render web service
+# Render sets this automatically as 'RENDER_EXTERNAL_URL'
+WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL")
+
+# This is a random string you create to make your webhook secure
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
