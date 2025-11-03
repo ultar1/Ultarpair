@@ -106,14 +106,16 @@ async def list_blacklist_command(update: Update, context: ContextTypes.DEFAULT_T
             return
 
         message = "<b>Current Blacklisted Terms:</b>\n\n"
+        
+        # --- FIX: The broken example line is GONE ---
         for term in terms:
-            escaped_term = html.escape(str(term)) # Use str(term) just in case
-            message += f"• Example: `lilian`
-message += f"• <code>{escaped_term}</code>\n"
+            escaped_term = html.escape(str(term)) 
+            message += f"• <code>{escaped_term}</code>\n"
 
         await update.message.reply_text(message, parse_mode=ParseMode.HTML)
         
     except Exception as e:
         logger.error(f"Error in list_blacklist_command: {e}")
         await update.message.reply_text("An error occurred while fetching the blacklist.")
+
 
