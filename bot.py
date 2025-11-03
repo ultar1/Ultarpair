@@ -62,10 +62,9 @@ async def setup_bot():
         webhook_url = f"{config.WEBHOOK_URL}/webhook"
         logger.info(f"Setting webhook to: {webhook_url}")
         
-        # We pass the secret token to Telegram for security
+        # We have removed the secret_token from this call
         await application.bot.set_webhook(
-            url=webhook_url,
-            secret_token=config.WEBWEBHOOK_SECRET
+            url=webhook_url
         )
         logger.info("Webhook set successfully.")
     except Exception as e:
@@ -82,10 +81,8 @@ def health_check():
 async def telegram_webhook():
     """Handles incoming updates from Telegram."""
     
-    # 1. Check the secret token (for security)
-    if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != config.WEBHOOK_SECRET:
-        logger.warning("Invalid webhook secret token received.")
-        abort(403) # Forbidden
+    # 1. We have removed the secret token check.
+    # This is less secure, as anyone who knows your URL can send fake updates.
         
     try:
         # 2. Get the JSON data from Telegram
@@ -107,7 +104,6 @@ async def telegram_webhook():
 
 # When Gunicorn starts, it loads this file.
 # We need to run our async setup_bot() function ONCE.
-# We can do this by just calling it in the main body.
 # This code will run when Gunicorn first loads the app.
 
 # Check for required env vars *before* trying to run setup
@@ -117,8 +113,6 @@ elif not config.DATABASE_URL:
     logger.critical("!!! ERROR: DATABASE_URL is not set. !!!")
 elif not config.WEBHOOK_URL:
     logger.critical("!!! ERROR: WEBHOOK_URL is not set. !!!")
-elif not config.WEBHOOK_SECRET:
-    logger.critical("!!! ERROR: WEBHOOK_SECRET is not set. !!!")
 else:
     logger.info("All environment variables seem to be set.")
     logger.info("Running async setup to set webhook...")
