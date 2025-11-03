@@ -4,3 +4,4 @@ python-dotenv
 Flask
 gunicorn
 uvicorn
+asgiref
