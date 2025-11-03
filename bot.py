@@ -9,6 +9,7 @@ from telegram.ext import (
     ChatMemberHandler,
     ContextTypes,
 )
+from asgiref.wsgi import WsgiToAsgi # <--- 1. IMPORT THE TRANSLATOR
 
 # Import config (which loads env vars) and database functions
 import config
@@ -30,7 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- Initialize Flask App and Telegram Application ---
-app = Flask(__name__)
+flask_app = Flask(__name__) # <--- 2. RENAME to 'flask_app'
 
 # Build the Telegram Application
 # We build it here so both our setup and webhook handler can use it
@@ -72,12 +73,14 @@ async def setup_bot():
 
 # --- Web Server Routes ---
 
-@app.route('/')
+# 3. UPDATE all routes to use '@flask_app'
+@flask_app.route('/')
 def health_check():
     """Responds to Render's health check."""
     return "Bot is alive and listening for webhooks!", 200
 
-@app.route('/webhook', methods=['POST'])
+# 3. UPDATE all routes to use '@flask_app'
+@flask_app.route('/webhook', methods=['POST'])
 async def telegram_webhook():
     """Handles incoming updates from Telegram."""
     
@@ -91,7 +94,7 @@ async def telegram_webhook():
         # 3. Create an Update object
         update = Update.de_json(data, application.bot)
         
-        # 4. Process the update (this runs your command/moderation handlers)
+        # 4. Process the. update (this runs your command/moderation handlers)
         await application.process_update(update)
         
         return "ok", 200
@@ -121,6 +124,12 @@ else:
         logger.info("Async setup complete. Ready for Gunicorn.")
     except Exception as e:
         logger.critical(f"Failed to run async setup: {e}")
+
+# 4. WRAP THE APP
+# This is the magic line.
+# We create the final 'app' variable that Gunicorn will use.
+# It wraps our Flask app in the ASGI translator.
+app = WsgiToAsgi(flask_app)
 
 # DO NOT ADD app.run() or if __name__ == '__main__':
 # Gunicorn will manage the server.
