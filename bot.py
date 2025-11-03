@@ -65,7 +65,7 @@ async def setup_bot():
         # We pass the secret token to Telegram for security
         await application.bot.set_webhook(
             url=webhook_url,
-            secret_token=config.WEBHOOK_SECRET
+            secret_token=config.WEBWEBHOOK_SECRET
         )
         logger.info("Webhook set successfully.")
     except Exception as e:
@@ -103,23 +103,30 @@ async def telegram_webhook():
         logger.error(f"Error handling webhook: {e}")
         return "error", 500
 
-# --- Start the Application ---
-if __name__ == '__main__':
-    # 1. Check for all required environment variables
-    if not config.TOKEN:
-        logger.critical("!!! ERROR: BOT_TOKEN is not set. !!!")
-    elif not config.DATABASE_URL:
-        logger.critical("!!! ERROR: DATABASE_URL is not set. !!!")
-    elif not config.WEBHOOK_URL:
-        logger.critical("!!! ERROR: RENDER_EXTERNAL_URL is not set. (This is set automatically by Render) !!!")
-    elif not config.WEBHOOK_SECRET:
-        logger.critical("!!! ERROR: WEBHOOK_SECRET is not set. Please add it to your environment. !!!")
-    else:
-        # 2. Run the async setup function to set the webhook
-        logger.info("Running async setup...")
+# --- Setup on Gunicorn Start ---
+
+# When Gunicorn starts, it loads this file.
+# We need to run our async setup_bot() function ONCE.
+# We can do this by just calling it in the main body.
+# This code will run when Gunicorn first loads the app.
+
+# Check for required env vars *before* trying to run setup
+if not config.TOKEN:
+    logger.critical("!!! ERROR: BOT_TOKEN is not set. !!!")
+elif not config.DATABASE_URL:
+    logger.critical("!!! ERROR: DATABASE_URL is not set. !!!")
+elif not config.WEBHOOK_URL:
+    logger.critical("!!! ERROR: WEBHOOK_URL is not set. !!!")
+elif not config.WEBHOOK_SECRET:
+    logger.critical("!!! ERROR: WEBHOOK_SECRET is not set. !!!")
+else:
+    logger.info("All environment variables seem to be set.")
+    logger.info("Running async setup to set webhook...")
+    try:
         asyncio.run(setup_bot())
-        
-        # 3. Start the Flask web server
-        port = int(os.environ.get("PORT", 8080))
-        logger.info(f"Starting Flask server on host 0.0.0.0 port {port}")
-        app.run(host="0.0.0.0", port=port)
+        logger.info("Async setup complete. Ready for Gunicorn.")
+    except Exception as e:
+        logger.critical(f"Failed to run async setup: {e}")
+
+# DO NOT ADD app.run() or if __name__ == '__main__':
+# Gunicorn will manage the server.
