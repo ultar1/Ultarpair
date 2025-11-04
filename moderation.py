@@ -101,7 +101,7 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Checks new members. 
     1. Kicks bots if /antibot is on.
     2. Checks humans against the blacklist.
-    3. Welcomes them if not kicked.
+    3. Welcomes them if not kicked (auto-deletes after 1 minute).
     """
     if not update.chat_member or not update.chat_member.new_chat_member:
         return
@@ -164,7 +164,7 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await context.bot.ban_chat_member(chat_id=chat_id, user_id=user.id)
                             sent_message = await context.bot.send_message(
                                 chat_id=chat_id,
-                                text=f"🤖 Auto-removal: {html.escape(user.full_name)}. (Blacklist match: <b>{blocked_term}</b>).",
+                                text=f"Auto-removal: {html.escape(user.full_name)}. (Blacklist match: <b>{blocked_term}</b>).",
                                 parse_mode=ParseMode.HTML
                             )
                             await asyncio.sleep(5)
@@ -173,7 +173,7 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             logger.error(f"Failed to kick user {user.id}: {e}")
                             await context.bot.send_message(
                                 chat_id=chat_id,
-                                text=f"<b>Action Failed!</b>\nUser {html.escape(user.full_name)} matches the blacklist, but I could not remove them.",
+                                text=f"Action Failed!\nUser {html.escape(user.full_name)} matches the blacklist, but I could not remove them.",
                                 parse_mode=ParseMode.HTML
                             )
                         return # User is kicked, stop here.
@@ -192,12 +192,29 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Replace placeholders
                 formatted_message = message.replace("{user_name}", user_name).replace("{chat_name}", chat_name)
                 
-                await context.bot.send_message(
+                # Send the message
+                sent_msg = await context.bot.send_message(
                     chat_id=chat_id,
                     text=formatted_message,
                     parse_mode=ParseMode.HTML 
                 )
                 logger.info(f"Sent welcome message to {user.full_name} in {chat_id}")
+
+                # --- (WELCOME DELETION FIX) ---
+                # Schedule deletion after 60 seconds (1 minute)
+                run_at = datetime.now(timezone.utc) + timedelta(minutes=1)
+                await asyncio.to_thread(
+                    database.add_job,
+                    job_type="delete_message", # <-- We need a new job type
+                    chat_id=chat_id,
+                    target_id=sent_msg.message_id, # <-- Pass the message ID to delete
+                    run_at=run_at
+                )
+                logger.info(f"Scheduled welcome message {sent_msg.message_id} for deletion.")
+                # --- (END OF FIX) ---
+
+            else:
+                logger.info(f"Welcome is ON for {chat_id} but no message is set.")
     except Exception as e:
         logger.error(f"Failed to send welcome message: {e}")
 
@@ -274,4 +291,4 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "antilink", update, context, 
                     settings.get('antilink_warn_limit', 3)
                 )
-                return 
+                return
