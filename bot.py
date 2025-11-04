@@ -66,6 +66,7 @@ async def setup_bot():
 
 
 # --- Main function to start the bot ---
+# --- Main function to start the bot ---
 async def main():
     """Set up and run the bot's webhook server."""
     
@@ -81,14 +82,12 @@ async def main():
     
     logger.info(f"Starting webhook server on 0.0.0.0:{PORT}")
     
-    # This single command starts the server AND sets the webhook
+    # This is the corrected call, without the health_check arguments
     await application.run_webhook(
         listen="0.0.0.0",
         port=PORT,
         webhook_url=WEBHOOK_URL,
-        allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER],
-        health_check_path="/", # This handles Render's health check
-        health_check_response="Bot is alive and kicking!"
+        allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER]
     )
 
 if __name__ == "__main__":
@@ -99,3 +98,4 @@ if __name__ == "__main__":
     
     logger.info("Starting bot...")
     asyncio.run(main())
+
