@@ -20,7 +20,7 @@ from database import (
     add_antilink_whitelist,
     remove_antilink_whitelist,
     get_antilink_whitelist,
-    set_welcome_message  # <-- New Welcome Setter
+    set_welcome_message  # <-- Added for welcome setting
 )
 # --- (END OF FIX) ---
 import config
@@ -525,3 +525,77 @@ async def antiword_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await delete_and_reply(update, "Unknown command. Use `/antiword [on/off/add/remove/list]`")
+
+
+# --- (NEW) /welcome Command ---
+async def welcome_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Toggles the welcome message feature on or off."""
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    
+    if not await is_group_chat(update): return
+    if not await is_admin(user_id, chat_id, context):
+        await delete_and_reply(update, "You must be a group admin to use this command.")
+        return
+        
+    if not context.args or context.args[0].lower() not in ['on', 'off']:
+        # Check current status
+        try:
+            settings = await asyncio.to_thread(get_group_settings, chat_id)
+            status_str = "ON" if settings.get('welcome_enabled') else "OFF"
+            await delete_and_reply(update, f"Usage: `/welcome on` or `/welcome off`\n(Current status is: **{status_str}**)")
+        except Exception as e:
+            logger.error(f"Error checking welcome status: {e}")
+            await delete_and_reply(update, "Usage: `/welcome on` or `/welcome off`")
+        return
+        
+    new_status_str = context.args[0].lower()
+    new_status_bool = True if new_status_str == 'on' else False
+    
+    try:
+        success = await asyncio.to_thread(set_group_setting, chat_id, "welcome_enabled", new_status_bool)
+        if success:
+            if new_status_bool:
+                await delete_and_reply(update, "✅ Welcome messages have been **enabled**.\nUse `/setwelcome` to create your message.")
+            else:
+                await delete_and_reply(update, "❌ Welcome messages have been **disabled**.")
+        else:
+            await delete_and_reply(update, "Failed to update welcome status. Check logs.")
+            
+    except Exception as e:
+        logger.error(f"Error in welcome_command: {e}")
+        await delete_and_reply(update, "An error occurred while setting welcome status.")
+
+async def setwelcome_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Sets the welcome message for the group."""
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    
+    if not await is_group_chat(update): return
+    if not await is_admin(user_id, chat_id, context):
+        await delete_and_reply(update, "You must be a group admin to use this command.")
+        return
+
+    if not context.args:
+        await delete_and_reply(update, 
+            "Usage: `/setwelcome [message]`\n\n"
+            "You can use placeholders:\n"
+            "`{user_name}` - The new user's full name.\n"
+            "`{chat_name}` - The group's name.\n\n"
+            "Example: `/setwelcome Welcome {user_name} to {chat_name}!`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+        
+    # Get the raw message text after the command
+    welcome_message = update.message.text.split(maxsplit=1)[1]
+    
+    try:
+        success = await asyncio.to_thread(set_welcome_message, chat_id, welcome_message)
+        if success:
+            await delete_and_reply(update, "✅ Welcome message has been updated!")
+        else:
+            await delete_and_reply(update, "Failed to update welcome message. Check logs.")
+    except Exception as e:
+        logger.error(f"Error in setwelcome_command: {e}")
+        await delete_and_reply(update, "An error occurred while setting the message.")
