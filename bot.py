@@ -2,7 +2,7 @@ import logging
 import os
 import asyncio
 from flask import Flask, request, abort
-from telegram import Update  # <-- 1. IMPORT THIS
+from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -66,8 +66,6 @@ async def setup_bot():
         webhook_url = f"{config.WEBHOOK_URL}/webhook"
         logger.info(f"Setting webhook to: {webhook_url}")
         
-        # --- 2. (THE FIX) ---
-        # Tell Telegram to send us MESSAGE and CHAT_MEMBER updates.
         await application.bot.set_webhook(
             url=webhook_url,
             allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER]
@@ -83,22 +81,33 @@ def health_check():
     """Responds to Render's health check."""
     return "Bot is alive and listening for webhooks!", 200
 
+# --- (THIS IS THE FIX) ---
 @flask_app.route('/webhook', methods=['POST'])
-async def telegram_webhook():
+def telegram_webhook(): # <-- 1. This is now SYNC (no 'async')
     """Handles incoming updates from Telegram."""
         
     try:
+        # Get data synchronously
         data = request.get_json()
         
+        # De-serialize update synchronously
         update = Update.de_json(data, application.bot)
         
-        await application.process_update(update)
+        # 2. Hand off the async processing to the bot's event loop
+        # This is thread-safe and runs in the background.
+        asyncio.run_coroutine_threadsafe(
+            application.process_update(update),
+            application.loop
+        )
         
+        # 3. Return "ok" to Telegram immediately
         return "ok", 200
         
     except Exception as e:
         logger.error(f"Error handling webhook: {e}")
         return "error", 500
+# --- (END OF FIX) ---
+
 
 # --- Setup on Gunicorn Start ---
 # This code runs ONCE when your Gunicorn worker starts.
@@ -119,5 +128,6 @@ else:
         logger.critical(f"Failed to run async setup: {e}")
 
 # --- WRAP THE APP ---
-# This is the translator that fixes the server crash.
+# This line now makes perfect sense:
+# We are wrapping our SYNC Flask app to run on an ASYNC Gunicorn/Uvicorn server
 app = WsgiToAsgi(flask_app)
