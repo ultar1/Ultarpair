@@ -10,7 +10,8 @@ services:
     # This command runs when you deploy
     buildCommand: "pip install -r requirements.txt"
     # This command starts your bot
-    startCommand: "gunicorn -k uvicorn.workers.UvicornWorker main:app"
+    # *** IMPORTANT: Make sure this points to your main file and the 'application' variable ***
+    startCommand: "gunicorn -k uvicorn.workers.UvicornWorker main:application"
     # This is the health check route we built in main.py
     healthCheck:
       path: /
@@ -20,8 +21,8 @@ services:
         sync: false # Paste your Neon DB URL here
       - key: BOT_TOKEN
         sync: false # Paste your bot token here
-      - key: WEBHOOK_SECRET
-        sync: false # Paste your secret string here
+      
+      # --- WEBHOOK_SECRET has been removed ---
       
       # --- These are set automatically or are safe ---
       - key: ADMIN_IDS
