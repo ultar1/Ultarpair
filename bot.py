@@ -77,9 +77,9 @@ def telegram_webhook(): # <-- This MUST be sync (it's a Flask route)
         update = Update.de_json(data, application.bot)
         
         # --- (THIS IS THE FIX) ---
-        # Get the event loop we saved during startup, which is
-        # running on the main thread.
-        loop = application.main_loop 
+        # Get the event loop we saved on the FLASK_APP object,
+        # which is running on the main thread.
+        loop = flask_app.main_loop 
         
         # Use run_coroutine_threadsafe to schedule the async task
         # on that main loop. This is thread-safe and non-blocking.
@@ -125,11 +125,11 @@ if __name__ != "__main__":
             loop = asyncio.get_event_loop()
             
             # --- (THIS IS THE OTHER PART OF THE FIX) ---
-            # Save the main loop onto the application object
-            # so the webhook function can access it from another thread.
-            application.main_loop = loop 
+            # Save the main loop onto the FLASK_APP object,
+            # which *does* allow setting new attributes.
+            flask_app.main_loop = loop 
             
-            logger.info("Got main event loop and saved it to application.main_loop.")
+            logger.info("Got main event loop and saved it to flask_app.main_loop.")
             
             # 3. Run ASYNC setup on that loop
             logger.info("Running async setup (initialize, set_webhook)...")
