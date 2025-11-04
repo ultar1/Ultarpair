@@ -2,7 +2,7 @@ import logging
 import os
 import asyncio
 from flask import Flask, request, abort
-from telegram import Update
+from telegram import Update  # <-- 1. IMPORT THIS
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -28,6 +28,9 @@ from moderation import check_new_member
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
+# Reduce httpx logging noise
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 # --- Initialize Flask App and Telegram Application ---
@@ -55,21 +58,21 @@ async def setup_bot():
     application.add_handler(CommandHandler("listblacklist", list_blacklist_command))
     application.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
 
-    # --- THIS IS THE NEW FIX ---
-    # We must initialize the app inside the async loop
     logger.info("Initializing Telegram Application...")
     await application.initialize()
-    # -------------------------
 
     # Tell Telegram where to send updates (our webhook URL)
     try:
         webhook_url = f"{config.WEBHOOK_URL}/webhook"
         logger.info(f"Setting webhook to: {webhook_url}")
         
+        # --- 2. (THE FIX) ---
+        # Tell Telegram to send us MESSAGE and CHAT_MEMBER updates.
         await application.bot.set_webhook(
-            url=webhook_url
+            url=webhook_url,
+            allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER]
         )
-        logger.info("Webhook set successfully.")
+        logger.info("Webhook set successfully with allowed_updates.")
     except Exception as e:
         logger.error(f"Error setting webhook: {e}")
 
@@ -85,10 +88,7 @@ async def telegram_webhook():
     """Handles incoming updates from Telegram."""
         
     try:
-        # --- THIS IS THE OTHER FIX ---
-        # We removed 'await' from this line
         data = request.get_json()
-        # ---------------------------
         
         update = Update.de_json(data, application.bot)
         
