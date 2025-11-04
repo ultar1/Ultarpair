@@ -75,7 +75,7 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # 1. Send your new message and store the message object
                 sent_message = await context.bot.send_message(
                     chat_id=chat_id,
-                    text=f"🤖 Auto-removal: {html.escape(user.full_name)}. (Blacklist match: <b>{blocked_term}</b>).",
+                    text=f"Auto-removal: {html.escape(user.full_name)}. (Blacklist match: <b>{blocked_term}</b>).",
                     parse_mode=ParseMode.HTML
                 )
                 
@@ -97,7 +97,7 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # so the admin can see it.
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text=f"⚠️ <b>Action Failed!</b> ⚠️\n"
+                    text=f"<b>Action Failed!</b>\n"
                          f"User {html.escape(user.full_name)} matches the blacklist, but I could not remove them. "
                          "Please make sure I am an admin with 'Ban users' permission.",
                     parse_mode=ParseMode.HTML
