@@ -218,7 +218,7 @@ def set_group_setting(chat_id: int, setting: str, value) -> bool:
     allowed_settings = {
         "antibot_enabled", "antilink_enabled", "antiword_enabled", 
         "antilink_warn_limit", "antiword_warn_limit",
-        "welcome_enabled"  # <-- ADDED
+        "welcome_enabled"
     }
     if setting not in allowed_settings:
         logger.error(f"Invalid setting name: {setting}")
