@@ -1,11 +1,11 @@
 import logging
 import html
-import asyncio
+import asyncio  # <-- Make sure this is imported
 from telegram import Update
 from telegram.ext import ContextTypes
 import database 
 from telegram.constants import ParseMode
-from fuzzywuzzy import fuzz  # Import the fuzzy matching library
+from fuzzywuzzy import fuzz
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,6 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        # --- (FIX 1) ---
         # Get blacklist for THIS specific chat
         blacklist = await asyncio.to_thread(database.get_blacklist, chat_id)
     except Exception as e:
@@ -56,15 +55,12 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not blacklist:
         return # Nothing to check against
 
-    # --- FUZZY LOGIC ---
     SIMILARITY_THRESHOLD = 90 
 
     for blocked_term in blacklist:
         # 'blocked_term' is already lowercase from your add_blacklist command
         
-        # --- (FIX 2) ---
         # Use token_set_ratio to compare whole words, not partial strings.
-        # This prevents "admin" from matching "Administration".
         ratio = fuzz.token_set_ratio(blocked_term, user_full_text)
         
         if ratio >= SIMILARITY_THRESHOLD:
@@ -72,17 +68,33 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 # KICK THE USER!
                 await context.bot.ban_chat_member(chat_id=chat_id, user_id=user.id)
+                logger.info(f"Successfully kicked user {user.id}")
+
+                # --- (THIS IS THE UPDATED BLOCK) ---
                 
-                await context.bot.send_message(
+                # 1. Send your new message and store the message object
+                sent_message = await context.bot.send_message(
                     chat_id=chat_id,
-                    text=f"Removed user {html.escape(user.full_name)} for matching a blacklisted term (<b>{blocked_term}</b>).",
+                    text=f"🤖 Auto-removal: {html.escape(user.full_name)}. (Blacklist match: <b>{blocked_term}</b>).",
                     parse_mode=ParseMode.HTML
                 )
-                logger.info(f"Successfully kicked user {user.id}")
+                
+                # 2. Wait 5 seconds (asynchronously)
+                await asyncio.sleep(5)
+                
+                # 3. Delete the message (with error handling)
+                try:
+                    await sent_message.delete()
+                    logger.info(f"Auto-deleted kick message {sent_message.message_id}")
+                except Exception as e:
+                    logger.warning(f"Could not auto-delete kick message: {e}")
+                
                 return # Stop checking, user is gone
             
             except Exception as e:
                 logger.error(f"Failed to kick user {user.id}: {e}")
+                # This is the "failed to kick" message, we don't auto-delete this one
+                # so the admin can see it.
                 await context.bot.send_message(
                     chat_id=chat_id,
                     text=f"⚠️ <b>Action Failed!</b> ⚠️\n"
@@ -90,4 +102,4 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                          "Please make sure I am an admin with 'Ban users' permission.",
                     parse_mode=ParseMode.HTML
                 )
-                return # Stop checking, we can't do anything
+                return
