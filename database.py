@@ -41,6 +41,19 @@ def init_db():
                     run_at TIMESTAMPTZ NOT NULL      -- 'timestamp with time zone'
                 );
             """)
+
+                # ... inside init_db() ...
+    
+    # NEW: Table to store per-group settings
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS group_settings (
+            chat_id BIGINT PRIMARY KEY,
+            antibot_enabled BOOLEAN DEFAULT FALSE
+        );
+    """)
+    
+    # ... your other tables ...
+
             # Create an index for faster job polling
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_jobs_run_at ON scheduled_jobs (run_at);
@@ -70,6 +83,47 @@ def add_to_blacklist(chat_id: int, term: str) -> bool:
         return False
     finally:
         conn.close()
+
+def set_antibot_status(chat_id: int, enabled: bool) -> bool:
+    """Sets the anti-bot status for a group. Returns True on success."""
+    # This query will insert if not present, or update if it is.
+    sql = """
+        INSERT INTO group_settings (chat_id, antibot_enabled)
+        VALUES (%s, %s)
+        ON CONFLICT (chat_id)
+        DO UPDATE SET antibot_enabled = EXCLUDED.antibot_enabled;
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, (chat_id, enabled))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error setting anti-bot status: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+def is_antibot_enabled(chat_id: int) -> bool:
+    """Checks if the anti-bot feature is enabled for a group. Defaults to False."""
+    sql = "SELECT antibot_enabled FROM group_settings WHERE chat_id = %s"
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, (chat_id,))
+            result = cur.fetchone()
+            # If 'result' is not None and result[0] is True
+            if result and result[0]:
+                return True
+            return False # Default to false if no row exists or it's false
+    except Exception as e:
+        logger.error(f"Error checking anti-bot status: {e}")
+        return False # Default to false on error
+    finally:
+        conn.close()
+
 
 def remove_from_blacklist(chat_id: int, term: str) -> bool:
     sql = "DELETE FROM blacklist WHERE chat_id = %s AND term = %s"
