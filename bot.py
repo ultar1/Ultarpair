@@ -1,7 +1,6 @@
 import logging
 import os
 import asyncio
-from flask import Flask, request, abort
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -9,7 +8,6 @@ from telegram.ext import (
     ChatMemberHandler,
     ContextTypes,
 )
-from asgiref.wsgi import WsgiToAsgi # This is the translator
 
 # Import config (which loads env vars) and database functions
 import config
@@ -20,8 +18,8 @@ from commands import (
     start_command,
     add_blacklist_command,
     remove_blacklist_command,
-    silent_command,       # <-- Added
-    pin_command,          # <-- Added
+    silent_command,
+    pin_command,
     list_blacklist_command
 )
 from moderation import check_new_member
@@ -35,9 +33,6 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-# --- Initialize Flask App and Telegram Application ---
-flask_app = Flask(__name__) # Renamed to 'flask_app'
-
 # Build the Telegram Application
 try:
     application = Application.builder().token(config.TOKEN).build()
@@ -49,8 +44,7 @@ except Exception as e:
 
 # --- Bot Setup ---
 async def setup_bot():
-    """Initializes DB, handlers, the application, and the webhook."""
-    # This runs inside the main loop, so we can use 'await'
+    """Initializes DB and registers handlers."""
     
     logger.info("Initializing database...")
     # Run sync init_db in a thread to be safe
@@ -61,85 +55,47 @@ async def setup_bot():
     application.add_handler(CommandHandler("addblacklist", add_blacklist_command))
     application.add_handler(CommandHandler("removeblacklist", remove_blacklist_command))
     application.add_handler(CommandHandler("listblacklist", list_blacklist_command))
-    application.add_handler(CommandHandler("silent", silent_command))    # <-- Added
-    application.add_handler(CommandHandler("pin", pin_command))        # <-- Added
+    application.add_handler(CommandHandler("silent", silent_command))
+    application.add_handler(CommandHandler("pin", pin_command))
     application.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
 
     logger.info("Initializing Telegram Application...")
     await application.initialize()
+    logger.info("Handlers and DB are set up.")
+    # We no longer call set_webhook here. The main() function will do it.
 
-    # Tell Telegram where to send updates (our webhook URL)
-    try:
-        webhook_url = f"{config.WEBHOOK_URL}/webhook"
-        logger.info(f"Setting webhook to: {webhook_url}")
-        
-        await application.bot.set_webhook(
-            url=webhook_url,
-            allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER]
-        )
-        logger.info("Webhook set successfully with allowed_updates.")
-    except Exception as e:
-        logger.error(f"Error setting webhook: {e}", exc_info=True)
 
-# --- Web Server Routes ---
+# --- Main function to start the bot ---
+async def main():
+    """Set up and run the bot's webhook server."""
+    
+    # Run the setup function
+    await setup_bot() 
 
-@flask_app.route('/')
-def health_check():
-    """Responds to Render's health check."""
-    return "Bot is alive and listening for webhooks!", 200
+    # Get port from environment variables (for Render)
+    # Default to 8443 if not set (for local testing)
+    PORT = int(os.environ.get("PORT", 8443))
+    
+    # Get webhook URL from config
+    WEBHOOK_URL = f"{config.WEBHOOK_URL}/webhook"
+    
+    logger.info(f"Starting webhook server on 0.0.0.0:{PORT}")
+    
+    # This single command starts the server AND sets the webhook
+    await application.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        webhook_url=WEBHOOK_URL,
+        allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER],
+        health_check_path="/", # This handles Render's health check
+        health_check_response="Bot is alive and kicking!"
+    )
 
-# --- (THIS IS THE FIRST FIX) ---
-@flask_app.route('/webhook', methods=['POST'])
-def telegram_webhook(): # <-- Must be SYNC for Flask
-    """Handles incoming updates from Telegram."""
-    try:
-        data = request.get_json()
-        update = Update.de_json(data, application.bot)
-        
-        # Get the event loop we saved at startup
-        loop = flask_app.main_loop 
-        
-        # Safely schedule the async processing on that loop
-        # This is non-blocking and thread-safe.
-        asyncio.run_coroutine_threadsafe(
-            application.process_update(update),
-            loop
-        )
-        
-        return "ok", 200
-        
-    except Exception as e:
-        logger.error(f"Error handling webhook: {e}", exc_info=True)
-        return "error", 500
-
-# --- (THIS IS THE SECOND FIX) ---
-# --- Setup on Gunicorn Start ---
-if __name__ != "__main__":
+if __name__ == "__main__":
+    # Check for essential env vars first
     if not all([config.TOKEN, config.DATABASE_URL, config.WEBHOOK_URL]):
         logger.critical("!!! ERROR: Missing TOKEN, DATABASE_URL, or WEBHOOK_URL. !!!")
         exit(1)
-    else:
-        logger.info("All environment variables seem to be set.")
-        
-        try:
-            # 1. Get the main event loop from Gunicorn/Uvicorn
-            loop = asyncio.get_event_loop()
-            logger.info("Got main event loop.")
-            
-            # 2. Save it to the flask_app object
-            # This is safe and fixes the "no attribute" error
-            flask_app.main_loop = loop
-            logger.info("Saved event loop to flask_app.main_loop.")
-
-            # 3. Run your async setup ON THAT LOOP
-            logger.info("Running async setup (db, handlers, webhook)...")
-            loop.run_until_complete(setup_bot())
-            logger.info("Async setup complete.")
-
-        except Exception as e:
-            logger.critical(f"Failed to run async setup: {e}", exc_info=True)
-            exit(1)
-
-        # 4. Create the ASGI app for Gunicorn to use
-        app = WsgiToAsgi(flask_app)
-        logger.info("ASGI app created. Ready for Gunicorn.")
+    
+    logger.info("Starting bot...")
+    asyncio.run(main())
