@@ -2,24 +2,21 @@ import logging
 import html
 import asyncio
 import re
-from datetime import datetime, timedelta, timezone # <-- Import datetime
+from datetime import datetime, timedelta, timezone 
 from telegram import Update, ChatPermissions
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
-# Import new DB functions and remove old ones
 from database import (
     add_to_blacklist, 
     remove_from_blacklist, 
     get_blacklist, 
-    add_job  # <-- NEW
+    add_job
 )
 import config
 
 # Set up logging
 logger = logging.getLogger(__name__)
 
-# --- (NEW) Duration Parser ---
-# (Moved from jobs.py)
 def parse_duration(text: str) -> timedelta | None:
     """
     Parses a human-readable duration string into a timedelta.
@@ -47,30 +44,30 @@ def parse_duration(text: str) -> timedelta | None:
 async def delete_and_reply(update: Update, text: str, parse_mode: str = None):
     """
     Smarter reply function.
-    1. Deletes user's command (but ONLY in a group).
-    2. Sends a new reply from the bot.
+    1. Sends a new reply from the bot.
+    2. Deletes user's command (but ONLY in a group).
     3. Deletes the bot's reply after 5 seconds (but ONLY in a group).
     """
-    # --- (THE FIX IS HERE) ---
     is_private = update.message.chat.type == 'private'
     
-    # 1. Only delete user's command if in a group
+    # --- (THE FIX IS HERE: STEP 1 - REPLY FIRST) ---
+    try:
+        sent_message = await update.message.reply_text(text=text, parse_mode=parse_mode)
+    except Exception as e:
+        # If we can't reply, log the error and stop.
+        logger.error(f"Failed to send reply message: {e}")
+        return
+    # --- (END OF STEP 1) ---
+
+    # --- (STEP 2: Delete user's command *after* replying) ---
     if not is_private:
         try:
             await update.message.delete()
         except Exception as e:
             logger.warning(f"Failed to delete user's command message: {e}")
-    # --- (END OF FIX 1) ---
-
-    # 2. Send the reply
-    try:
-        sent_message = await update.message.reply_text(text=text, parse_mode=parse_mode)
-    except Exception as e:
-        logger.error(f"Failed to send reply message: {e}")
-        return
+    # --- (END OF STEP 2) ---
     
-    # 3. Only auto-delete bot's reply if in a group
-    # --- (THE FIX IS HERE) ---
+    # --- (STEP 3: Auto-delete bot's reply) ---
     if not is_private:
         await asyncio.sleep(5)
         
@@ -78,7 +75,7 @@ async def delete_and_reply(update: Update, text: str, parse_mode: str = None):
             await sent_message.delete()
         except Exception as e:
             logger.warning(f"Failed to auto-delete bot reply: {e}")
-    # --- (END OF FIX 2) ---
+    # --- (END OF STEP 3) ---
 
 
 async def is_admin(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -98,7 +95,6 @@ async def is_group_chat(update: Update) -> bool:
     """Checks if the command was used in a group. If not, sends a reply."""
     if update.message.chat.type in ['group', 'supergroup']:
         return True
-    # This will now correctly send and *keep* the error message in a private chat
     await delete_and_reply(update, "This command must be used in a group chat.")
     return False
 
@@ -116,7 +112,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• `/silent [duration]` - (Reply) Mute a user\n"
         "• `/pin [duration]` - (Reply) Pin a message"
     )
-    # This will now correctly send and *keep* the /start message in a private chat
     await delete_and_reply(update, start_message, parse_mode=ParseMode.MARKDOWN)
 
 async def add_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -223,7 +218,7 @@ async def silent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     try:
         # 1. Mute the user INDEFINITELY (the job will unmute them)
-        await context.bot.restrict_chat_member(
+        await context.bot.restrict_chat_.member(
             chat_id=chat_id,
             user_id=target_user.id,
             permissions=ChatPermissions(can_send_messages=False) # No until_date
@@ -256,8 +251,6 @@ async def pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_group_chat(update): return
     
     # --- (Silent Fail Logic) ---
-    # We want /pin to be silent, so we just delete the command if
-    # it's not by an admin or not a reply.
     if not await is_admin(user_id, chat_id, context):
         try: await update.message.delete()
         except Exception: pass
