@@ -1,7 +1,6 @@
 import logging
 import os
 import asyncio
-from flask import Flask, request, abort
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -9,7 +8,7 @@ from telegram.ext import (
     ChatMemberHandler,
     ContextTypes,
 )
-from asgiref.wsgi import WsgiToAsgi # This is the translator
+from telegram.constants import UpdateType # To specify update types
 
 # Import config (which loads env vars) and database functions
 import config
@@ -32,115 +31,76 @@ logging.basicConfig(
 )
 # Reduce httpx logging noise
 logging.getLogger("httpx").setLevel(logging.WARNING)
-
 logger = logging.getLogger(__name__)
 
-# --- Initialize Flask App and Telegram Application ---
-flask_app = Flask(__name__) # Renamed to 'flask_app'
+# --- NEW: Async Health Check ---
+async def health_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    A simple async HTTP endpoint for Render's health check.
+    This is NOT a Telegram command.
+    """
+    # This is a special object injected by the library for HTTP routes
+    if update.effective_user: 
+        return
+        
+    await update.effective_message.reply_text("Bot is alive and listening!", quote=False)
 
-# Build the Telegram Application
-try:
-    application = Application.builder().token(config.TOKEN).build()
-    logger.info("Telegram Application built successfully.")
-except Exception as e:
-    logger.critical(f"Failed to build Telegram Application: {e}")
-    exit(1)
 
-# --- (NEW) Async-only setup ---
-async def setup_bot_async():
-    """Run the async part of the setup."""
-    logger.info("Initializing Telegram Application...")
-    await application.initialize()
+# --- NEW: Bot Setup Function ---
+def create_application() -> Application:
+    """Creates and configures the Telegram Application."""
     
-    logger.info("Setting webhook...")
+    # 1. Initialize DB (This is sync, run it first)
+    logger.info("Initializing database...")
+    init_db()
+
+    # 2. Build the application
     try:
+        builder = Application.builder().token(config.TOKEN)
+        
+        # 3. (FIX) Set webhook settings *during build*
         webhook_url = f"{config.WEBHOOK_URL}/webhook"
-        await application.bot.set_webhook(
+        
+        # --- Webhook secret token has been removed ---
+        builder.webhook(
             url=webhook_url,
             allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER]
         )
-        logger.info(f"Webhook set successfully to: {webhook_url}")
+        
+        application = builder.build()
+        logger.info("Telegram Application built successfully.")
+
     except Exception as e:
-        logger.error(f"Error setting webhook: {e}")
+        logger.critical(f"Failed to build Telegram Application: {e}", exc_info=True)
+        exit(1)
 
-# --- Web Server Routes ---
-@flask_app.route('/')
-def health_check():
-    """Responds to Render's health check."""
-    return "Bot is alive and listening for webhooks!", 200
+    # 4. Register all your handlers
+    logger.info("Registering handlers...")
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("addblacklist", add_blacklist_command))
+    application.add_handler(CommandHandler("removeblacklist", remove_blacklist_command))
+    application.add_handler(CommandHandler("listblacklist", list_blacklist_command))
+    application.add_handler(CommandHandler("silent", silent_command))
+    application.add_handler(CommandHandler("pin", pin_command))
+    application.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
 
-@flask_app.route('/webhook', methods=['POST'])
-def telegram_webhook(): # <-- This MUST be sync (it's a Flask route)
-    """Handles incoming updates from Telegram."""
-    try:
-        data = request.get_json()
-        update = Update.de_json(data, application.bot)
-        
-        # --- (THIS IS THE FIX) ---
-        # Get the event loop we saved on the FLASK_APP object,
-        # which is running on the main thread.
-        loop = flask_app.main_loop 
-        
-        # Use run_coroutine_threadsafe to schedule the async task
-        # on that main loop. This is thread-safe and non-blocking.
-        asyncio.run_coroutine_threadsafe(
-            application.process_update(update),
-            loop
-        )
-        
-        return "ok", 200
-        
-    except Exception as e:
-        # Log the *actual* error
-        logger.error(f"Error handling webhook: {e}", exc_info=True)
-        return "error", 500
+    # 5. (FIX) Add the health check as an HTTP route
+    # This tells PTB to answer GET requests on "/"
+    application.add_route_handler("/", health_check)
+    
+    # --- The secret token check handler has been removed ---
 
-# --- Setup on Gunicorn Start ---
+    logger.info("Application setup complete.")
+    return application
+
+# --- Create the app for Gunicorn ---
 # This block runs when Gunicorn imports the file
 if __name__ != "__main__":
-    if not config.TOKEN:
-        logger.critical("!!! ERROR: BOT_TOKEN is not set. !!!")
-    elif not config.DATABASE_URL:
-        logger.critical("!!! ERROR: DATABASE_URL is not set. !!!")
-    elif not config.WEBHOOK_URL:
-        logger.critical("!!! ERROR: WEBHOOK_URL is not set. !!!")
+    # --- Removed WEBHOOK_SECRET from this check ---
+    if not all([config.TOKEN, config.DATABASE_URL, config.WEBHOOK_URL]):
+        logger.critical("!!! ERROR: Missing TOKEN, DATABASE_URL, or WEBHOOK_URL. !!!")
+        exit(1)
     else:
         logger.info("All environment variables seem to be set.")
-        
-        # 1. Run SYNC setup
-        logger.info("Initializing database...")
-        init_db()
-        
-        logger.info("Registering handlers...")
-        application.add_handler(CommandHandler("start", start_command))
-        application.add_handler(CommandHandler("addblacklist", add_blacklist_command))
-        application.add_handler(CommandHandler("removeblacklist", remove_blacklist_command))
-        application.add_handler(CommandHandler("listblacklist", list_blacklist_command))
-        application.add_handler(CommandHandler("silent", silent_command))
-        application.add_handler(CommandHandler("pin", pin_command))
-        application.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
-
-        # 2. Get the main event loop
-        try:
-            loop = asyncio.get_event_loop()
-            
-            # --- (THIS IS THE OTHER PART OF THE FIX) ---
-            # Save the main loop onto the FLASK_APP object,
-            # which *does* allow setting new attributes.
-            flask_app.main_loop = loop 
-            
-            logger.info("Got main event loop and saved it to flask_app.main_loop.")
-            
-            # 3. Run ASYNC setup on that loop
-            logger.info("Running async setup (initialize, set_webhook)...")
-            loop.run_until_complete(setup_bot_async())
-            logger.info("Async setup complete.")
-            
-        except Exception as e:
-            logger.critical(f"Failed to run async setup: {e}", exc_info=True)
-            # Don't create the app if setup failed
-            exit(1)
-
-        # 4. Create the ASGI app *after* setup is complete
-        app = WsgiToAsgi(flask_app)
-        logger.info("ASGI app created. Ready for Gunicorn.")
+        application = create_application()
+        logger.info("ASGI application created. Ready for Gunicorn.")
