@@ -19,6 +19,7 @@ from commands import (
     add_blacklist_command,
     remove_blacklist_command,
     silent_command,
+   antibot_command,
     pin_command,
     list_blacklist_command
 )
@@ -57,6 +58,7 @@ async def setup_bot():
     application.add_handler(CommandHandler("listblacklist", list_blacklist_command))
     application.add_handler(CommandHandler("silent", silent_command))
     application.add_handler(CommandHandler("pin", pin_command))
+    application.add_handler(CommandHandler("antibot", antibot_command)) 
     application.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
 
     logger.info("Initializing Telegram Application...")
