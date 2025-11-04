@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from telegram import Update, ChatPermissions
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
-# --- (CRITICAL FIX: Correct database imports for all features) ---
+# --- (CRITICAL FIX: CORRECT IMPORTS LIST) ---
 from database import (
     add_to_blacklist, 
     remove_from_blacklist, 
@@ -20,8 +20,8 @@ from database import (
     add_antilink_whitelist,
     remove_antilink_whitelist,
     get_antilink_whitelist,
-   welcome_command,
-    set_welcome_message  # <-- Added for welcome setting
+welcome_command,
+    set_welcome_message  # <-- Import database function
 )
 # --- (END OF FIX) ---
 import config
