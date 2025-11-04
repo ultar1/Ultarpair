@@ -6,14 +6,12 @@ from datetime import datetime, timedelta, timezone
 from telegram import Update, ChatPermissions
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
-# --- (HERE ARE THE NEW IMPORTS) ---
+# --- (THIS IS THE FIX) ---
 from database import (
     add_to_blacklist, 
     remove_from_blacklist, 
     get_blacklist, 
     add_job,
-    set_antibot_status,
-    is_antibot_enabled,
     # --- (NEW IMPORTS FOR /antilink and /antiword) ---
     set_group_setting,
     get_group_settings,
@@ -24,7 +22,7 @@ from database import (
     remove_antilink_whitelist,
     get_antilink_whitelist
 )
-# --- (END OF NEW IMPORTS) ---
+# --- (END OF FIX) ---
 import config
 
 # Set up logging
@@ -131,6 +129,8 @@ async def get_clean_url(url: str) -> str | None:
     except Exception as e:
         logger.error(f"Failed to parse domain from url: {url} | Error: {e}")
         return None
+
+
 # --- Command Handlers ---
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -180,7 +180,7 @@ async def add_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         success = await asyncio.to_thread(add_to_blacklist, chat_id, term)
         if success:
-            await delete_and_reply(update, f"Added '<code>{html.escape(term)}</code>' to this group's blacklist.", parse_mode=ParseMode.HTML)
+            await delete_and_reply(update, f"✅ Added '<code>{html.escape(term)}</code>' to this group's blacklist.", parse_mode=ParseMode.HTML)
         else:
             await delete_and_reply(update, f"'<code>{html.escape(term)}</code>' is already on this group's blacklist.", parse_mode=ParseMode.HTML)
     except Exception as e:
@@ -206,7 +206,7 @@ async def remove_blacklist_command(update: Update, context: ContextTypes.DEFAULT
     try:
         success = await asyncio.to_thread(remove_from_blacklist, chat_id, term)
         if success:
-            await delete_and_reply(update, f"Removed '<code>{html.escape(term)}</code>' from this group's blacklist.", parse_mode=ParseMode.HTML)
+            await delete_and_reply(update, f"✅ Removed '<code>{html.escape(term)}</code>' from this group's blacklist.", parse_mode=ParseMode.HTML)
         else:
             await delete_and_reply(update, f"'<code>{html.escape(term)}</code>' was not found on this group's blacklist.", parse_mode=ParseMode.HTML)
     except Exception as e:
@@ -240,7 +240,7 @@ async def list_blacklist_command(update: Update, context: ContextTypes.DEFAULT_T
         logger.error(f"Error in list_blacklist_command: {e}")
         await delete_and_reply(update, "An error occurred while fetching the blacklist.")
 
-# --- (BUG FIX) Job-based Commands ---
+# --- Job-based Commands ---
 
 async def silent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """(Admin) Mutes a user using Telegram's built-in scheduler."""
@@ -268,9 +268,7 @@ async def silent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     try:
-        # --- (THIS IS THE FIX) ---
-        # We calculate the 'until_date' and pass it to Telegram.
-        # Telegram will handle the unmute, not our scheduler.
+        # --- (THIS IS THE BUG FIX) ---
         if duration:
             until_date = datetime.now(timezone.utc) + duration
         else:
@@ -282,9 +280,9 @@ async def silent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             permissions=ChatPermissions(can_send_messages=False),
             until_date=until_date # <-- THE FIX
         )
-        # --- (END OF FIX) ---
+        # --- (END OF BUG FIX) ---
         
-        await delete_and_reply(update, f"User {html.escape(target_user.full_name)} has been muted {duration_text}.")
+        await delete_and_reply(update, f"🔇 User {html.escape(target_user.full_name)} has been muted {duration_text}.")
         
     except Exception as e:
         logger.error(f"Error in silent_command: {e}", exc_info=True)
@@ -324,7 +322,6 @@ async def pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         run_at = datetime.now(timezone.utc) + duration
         
-        # --- (BUG FIX: Removed "unmute" logic) ---
         await asyncio.to_thread(
             add_job,
             job_type="unpin", # This is now the only job type
@@ -370,15 +367,16 @@ async def antibot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         success = await asyncio.to_thread(set_group_setting, chat_id, "antibot_enabled", new_status_bool)
         if success:
             if new_status_bool:
-                await delete_and_reply(update, "Anti-bot feature has been **enabled**.")
+                await delete_and_reply(update, "✅ Anti-bot feature has been **enabled**.")
             else:
-                await delete_and_reply(update, "Anti-bot feature has been **disabled**.")
+                await delete_and_reply(update, "❌ Anti-bot feature has been **disabled**.")
         else:
             await delete_and_reply(update, "Failed to update anti-bot status. Check logs.")
             
     except Exception as e:
         logger.error(f"Error in antibot_command: {e}")
         await delete_and_reply(update, "An error occurred while setting anti-bot status.")
+
 
 # --- (NEW) /antilink Command ---
 async def antilink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -482,7 +480,7 @@ async def antiword_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_status_bool = True if action == 'on' else False
         success = await asyncio.to_thread(set_group_setting, chat_id, "antiword_enabled", new_status_bool)
         if success:
-            await delete_and_reply(update, f"Anti-word feature has been **{action.upper()}**.")
+            await delete_and_reply(update, f"✅ Anti-word feature has been **{action.upper()}**.")
         else:
             await delete_and_reply(update, "Failed to update anti-word status. Check logs.")
         return
@@ -496,7 +494,7 @@ async def antiword_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         success = await asyncio.to_thread(add_antiword, chat_id, word)
         if success:
-            await delete_and_reply(update, f"Word ` {html.escape(word)} ` added to the filter.", parse_mode=ParseMode.HTML)
+            await delete_and_reply(update, f"✅ Word ` {html.escape(word)} ` added to the filter.", parse_mode=ParseMode.HTML)
         else:
             await delete_and_reply(update, f"`{html.escape(word)}` is already on the filter list.", parse_mode=ParseMode.HTML)
         return
@@ -510,7 +508,7 @@ async def antiword_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         success = await asyncio.to_thread(remove_antiword, chat_id, word)
         if success:
-            await delete_and_reply(update, f"Word ` {html.escape(word)} ` removed from the filter.", parse_mode=ParseMode.HTML)
+            await delete_and_reply(update, f"✅ Word ` {html.escape(word)} ` removed from the filter.", parse_mode=ParseMode.HTML)
         else:
             await delete_and_reply(update, f"`{html.escape(word)}` was not on the filter list.", parse_mode=ParseMode.HTML)
         return
@@ -527,3 +525,4 @@ async def antiword_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await delete_and_reply(update, "Unknown command. Use `/antiword [on/off/add/remove/list]`")
+
