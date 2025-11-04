@@ -1,0 +1,53 @@
+# This tells Render.com how to build and run your bot's 2 services.
+# 1. The 'web' service for receiving webhooks.
+# 2. The 'worker' service for running the scheduler.
+
+services:
+  # Service 1: The Webhook Server (your main.py)
+  - type: web
+    name: bot-web
+    env: python
+    # This command runs when you deploy
+    buildCommand: "pip install -r requirements.txt"
+    # This command starts your bot
+    startCommand: "gunicorn -k uvicorn.workers.UvicornWorker main:app"
+    # This is the health check route we built in main.py
+    healthCheck:
+      path: /
+    envVars:
+      # --- Set these in your Render Environment page ---
+      - key: DATABASE_URL
+        sync: false # Paste your Neon DB URL here
+      - key: BOT_TOKEN
+        sync: false # Paste your bot token here
+      - key: WEBHOOK_SECRET
+        sync: false # Paste your secret string here
+      
+      # --- These are set automatically or are safe ---
+      - key: ADMIN_IDS
+        value: "7302005705" # This is safe to keep here
+      - key: WEBHOOK_URL
+        fromService:
+          type: web
+          name: bot-web  # This *must* match this service's 'name' above
+          property: url # This automatically gets your live URL
+
+  # Service 2: The Scheduler Worker (scheduler.py)
+  - type: worker
+    name: bot-scheduler
+    env: python
+    # It will use the same build as the 'web' service
+    buildCommand: "pip install -r requirements.txt"
+    # This just runs your scheduler file
+    startCommand: "python scheduler.py"
+    # The worker also needs access to the secrets
+    envVars:
+      # --- Set these in your Render Environment page ---
+      - key: DATABASE_URL
+        sync: false # Paste your Neon DB URL here
+      - key: BOT_TOKEN
+        sync: false # Paste your bot token here
+      
+      # --- This is safe to keep here ---
+      - key: ADMIN_IDS
+        value: "7302005705"
