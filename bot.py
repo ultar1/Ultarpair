@@ -23,6 +23,8 @@ from commands import (
     silent_command,
     antibot_command,
     pin_command,
+    ban_command,
+    kick_command,
     antilink_command,
     antiword_command,
     list_blacklist_command,
