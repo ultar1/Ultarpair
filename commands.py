@@ -20,7 +20,6 @@ from database import (
     add_antilink_whitelist,
     remove_antilink_whitelist,
     get_antilink_whitelist,
-welcome_command,
     set_welcome_message  # <-- Import database function
 )
 # --- (END OF FIX) ---
