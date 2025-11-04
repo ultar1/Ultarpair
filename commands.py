@@ -39,7 +39,7 @@ def parse_duration(text: str) -> timedelta | None:
         
     return None # Invalid format
 
-# --- (FIXED) Helper Function ---
+# --- Helper Function ---
 
 async def delete_and_reply(update: Update, text: str, parse_mode: str = None):
     """
@@ -50,24 +50,21 @@ async def delete_and_reply(update: Update, text: str, parse_mode: str = None):
     """
     is_private = update.message.chat.type == 'private'
     
-    # --- (THE FIX IS HERE: STEP 1 - REPLY FIRST) ---
+    # 1. Reply FIRST (to avoid 'message not found' error)
     try:
         sent_message = await update.message.reply_text(text=text, parse_mode=parse_mode)
     except Exception as e:
-        # If we can't reply, log the error and stop.
         logger.error(f"Failed to send reply message: {e}")
         return
-    # --- (END OF STEP 1) ---
 
-    # --- (STEP 2: Delete user's command *after* replying) ---
+    # 2. Delete user's command *after* replying
     if not is_private:
         try:
             await update.message.delete()
         except Exception as e:
             logger.warning(f"Failed to delete user's command message: {e}")
-    # --- (END OF STEP 2) ---
     
-    # --- (STEP 3: Auto-delete bot's reply) ---
+    # 3. Auto-delete bot's reply (only in group)
     if not is_private:
         await asyncio.sleep(5)
         
@@ -75,7 +72,6 @@ async def delete_and_reply(update: Update, text: str, parse_mode: str = None):
             await sent_message.delete()
         except Exception as e:
             logger.warning(f"Failed to auto-delete bot reply: {e}")
-    # --- (END OF STEP 3) ---
 
 
 async def is_admin(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -218,11 +214,13 @@ async def silent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     try:
         # 1. Mute the user INDEFINITELY (the job will unmute them)
-        await context.bot.restrict_chat_.member(
+        # --- (THIS IS THE FIX) ---
+        await context.bot.restrict_chat_member(
             chat_id=chat_id,
             user_id=target_user.id,
             permissions=ChatPermissions(can_send_messages=False) # No until_date
         )
+        # --- (END OF FIX) ---
         
         # 2. Calculate the run_at time in UTC
         run_at = datetime.now(timezone.utc) + duration
@@ -240,8 +238,8 @@ async def silent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await delete_and_reply(update, f"🔇 User {html.escape(target_user.full_name)} has been muted for {duration_text}.")
         
     except Exception as e:
-        logger.error(f"Error in silent_command: {e}")
-        await delete_and_reply(update, f"Failed to mute user. Error: {e}")
+        logger.error(f"Error in silent_command: {e}", exc_info=True) # Added exc_info for more details
+        await delete_and_reply(update, f"Failed to mute user. Do I have 'Restrict Users' permission?")
 
 async def pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """(Admin) Pins a message and schedules a persistent unpin job."""
@@ -294,7 +292,7 @@ async def pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.delete()
         
     except Exception as e:
-        logger.error(f"Error in pin_command: {e}")
+        logger.error(f"Error in pin_command: {e}", exc_info=True) # Added exc_info for more details
         # Still try to delete the command on failure
         try: await update.message.delete()
         except Exception: pass
