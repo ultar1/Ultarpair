@@ -77,11 +77,12 @@ def telegram_webhook(): # <-- This MUST be sync (it's a Flask route)
         update = Update.de_json(data, application.bot)
         
         # --- (THIS IS THE FIX) ---
-        # Get the same event loop Gunicorn/Uvicorn is running on
-        loop = asyncio.get_event_loop()
+        # Get the event loop we saved during startup, which is
+        # running on the main thread.
+        loop = application.main_loop 
         
         # Use run_coroutine_threadsafe to schedule the async task
-        # on that loop. This is thread-safe and non-blocking.
+        # on that main loop. This is thread-safe and non-blocking.
         asyncio.run_coroutine_threadsafe(
             application.process_update(update),
             loop
@@ -115,14 +116,20 @@ if __name__ != "__main__":
         application.add_handler(CommandHandler("addblacklist", add_blacklist_command))
         application.add_handler(CommandHandler("removeblacklist", remove_blacklist_command))
         application.add_handler(CommandHandler("listblacklist", list_blacklist_command))
-        application.add_handler(CommandHandler("silent", silent_command)) # <-- ADD THIS
-        application.add_handler(CommandHandler("pin", pin_command))       # <-- ADD THIS
+        application.add_handler(CommandHandler("silent", silent_command))
+        application.add_handler(CommandHandler("pin", pin_command))
         application.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
 
         # 2. Get the main event loop
         try:
             loop = asyncio.get_event_loop()
-            logger.info("Got main event loop.")
+            
+            # --- (THIS IS THE OTHER PART OF THE FIX) ---
+            # Save the main loop onto the application object
+            # so the webhook function can access it from another thread.
+            application.main_loop = loop 
+            
+            logger.info("Got main event loop and saved it to application.main_loop.")
             
             # 3. Run ASYNC setup on that loop
             logger.info("Running async setup (initialize, set_webhook)...")
