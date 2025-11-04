@@ -25,6 +25,7 @@ from commands import (
     pin_command,
     ban_command,
     kick_command,
+    invite_command,
     antilink_command,
     antiword_command,
     list_blacklist_command,
@@ -75,6 +76,7 @@ async def setup_bot():
     application.add_handler(CommandHandler("antiword", antiword_command))
     application.add_handler(CommandHandler("kick", kick_command))   # <-- ADD THIS
     application.add_handler(CommandHandler("ban", ban_command)) 
+    application.add_handler(CommandHandler("invite", invite_command)) 
     application.add_handler(CommandHandler("antibot", antibot_command)) 
     application.add_handler(CommandHandler("welcome", welcome_command))     # <-- ADDED
     application.add_handler(CommandHandler("setwelcome", setwelcome_command))   # <-- ADDED
