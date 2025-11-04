@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 import database 
 from telegram.constants import ParseMode
-from fuzzywuzzy import fuzz  # <-- NEW: Import the fuzzy matching library
+from fuzzywuzzy import fuzz  # Import the fuzzy matching library
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +16,11 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     new_member = update.chat_member.new_chat_member
     
+    # Only check users who are newly joining as "member"
     if new_member.status != "member":
         return
     
+    # Check old status to make sure they weren't already in the group
     old_status = update.chat_member.old_chat_member.status
     if old_status in ('creator', 'administrator', 'member'):
         return # User was already in the group, not a "new" join
@@ -38,15 +40,15 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text_to_check.append(user.last_name.lower())
 
     # Create one single string to check against
-    # e.g., "blessed lilian blessedlilian"
     user_full_text = " ".join(text_to_check)
 
     if not user_full_text:
         return
 
     try:
-        # Get blacklist (non-blocking)
-        blacklist = await asyncio.to_thread(database.get_blacklist)
+        # --- (FIX 1) ---
+        # Get blacklist for THIS specific chat
+        blacklist = await asyncio.to_thread(database.get_blacklist, chat_id)
     except Exception as e:
         logger.error(f"Failed to get blacklist during new member check: {e}")
         return
@@ -54,16 +56,16 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not blacklist:
         return # Nothing to check against
 
-    # --- NEW FUZZY LOGIC ---
-    # We set a "similarity" score. 90 means "90% similar".
-    # This will catch "lilian" and "lillian" or "blessed" and "b1essed"
+    # --- FUZZY LOGIC ---
     SIMILARITY_THRESHOLD = 90 
 
     for blocked_term in blacklist:
         # 'blocked_term' is already lowercase from your add_blacklist command
         
-        # This checks how similar the blocked_term is to parts of the user's name
-        ratio = fuzz.partial_ratio(blocked_term, user_full_text)
+        # --- (FIX 2) ---
+        # Use token_set_ratio to compare whole words, not partial strings.
+        # This prevents "admin" from matching "Administration".
+        ratio = fuzz.token_set_ratio(blocked_term, user_full_text)
         
         if ratio >= SIMILARITY_THRESHOLD:
             logger.info(f"MATCH: User '{user_full_text}' matches term '{blocked_term}' with {ratio}% similarity")
@@ -77,7 +79,7 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode=ParseMode.HTML
                 )
                 logger.info(f"Successfully kicked user {user.id}")
-                return
+                return # Stop checking, user is gone
             
             except Exception as e:
                 logger.error(f"Failed to kick user {user.id}: {e}")
@@ -88,5 +90,4 @@ async def check_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                          "Please make sure I am an admin with 'Ban users' permission.",
                     parse_mode=ParseMode.HTML
                 )
-                return
-
+                return # Stop checking, we can't do anything
