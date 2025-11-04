@@ -6,13 +6,12 @@ from datetime import datetime, timedelta, timezone
 from telegram import Update, ChatPermissions
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
-# --- (THIS IS THE FIX) ---
+# --- (CRITICAL FIX: Removed old, non-existent database imports) ---
 from database import (
     add_to_blacklist, 
     remove_from_blacklist, 
     get_blacklist, 
     add_job,
-    # --- (NEW IMPORTS FOR /antilink and /antiword) ---
     set_group_setting,
     get_group_settings,
     add_antiword,
@@ -20,7 +19,8 @@ from database import (
     get_antiword_list,
     add_antilink_whitelist,
     remove_antilink_whitelist,
-    get_antilink_whitelist
+    get_antilink_whitelist,
+    set_welcome_message  # <-- ADDED FOR WELCOME
 )
 # --- (END OF FIX) ---
 import config
@@ -142,21 +142,21 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• `/antibot [on/off]` - Toggle bot kicking.\n"
         "• `/antilink [on/off]` - Toggle link deletion.\n"
         "• `/antiword [on/off]` - Toggle bad word deletion.\n"
+        "• 👋 `/welcome [on/off]` - Toggle welcome messages.\n" # <-- NEW
+        "\n**Content Setup:**\n"
+        "• `/setwelcome [message]` - Set the welcome message.\n" # <-- NEW
+        "• `/antiword add [word]` - Add a word to filter.\n"
+        "• `/antilink allow [url]` - Allow a domain.\n"
         "\n**Blacklist Commands:**\n"
         "• `/addblacklist [term]` - Ban a name/username.\n"
         "• `/removeblacklist [term]` - Unban a name/username.\n"
-        "• `/listblacklist` - Show banned name list.\n"
-        "\n**Word Filtering:**\n"
-        "• `/antiword add [word]` - Add a word to filter.\n"
-        "• `/antiword remove [word]` - Remove a word.\n"
-        "• `/antiword list` - Show filtered word list.\n"
-        "\n**Link Filtering:**\n"
-        "• `/antilink allow [url]` - Allow a domain.\n"
-        "• `/antilink disallow [url]` - Remove a domain.\n"
-        "• `/antilink list` - Show allowed domain list.\n"
         "\n**Moderation Actions:**\n"
         "• `/silent [duration]` - (Reply) Mute a user.\n"
-        "• `/pin [duration]` - (Reply) Pin a message."
+        "• `/pin [duration]` - (Reply) Pin a message.\n"
+        "\n**List Commands:**\n"
+        "• `/listblacklist` - Show banned name list.\n"
+        "• `/antiword list` - Show filtered word list.\n"
+        "• `/antilink list` - Show allowed domain list."
     )
     # --- (END OF UPDATE) ---
     await delete_and_reply(update, start_message, parse_mode=ParseMode.MARKDOWN)
@@ -268,7 +268,7 @@ async def silent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     try:
-        # --- (THIS IS THE BUG FIX) ---
+        # --- (BUG FIX: Using Telegram's built-in scheduler) ---
         if duration:
             until_date = datetime.now(timezone.utc) + duration
         else:
@@ -278,7 +278,7 @@ async def silent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=chat_id,
             user_id=target_user.id,
             permissions=ChatPermissions(can_send_messages=False),
-            until_date=until_date # <-- THE FIX
+            until_date=until_date
         )
         # --- (END OF BUG FIX) ---
         
@@ -324,7 +324,7 @@ async def pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await asyncio.to_thread(
             add_job,
-            job_type="unpin", # This is now the only job type
+            job_type="unpin", # This is the only job type handled by the scheduler
             chat_id=chat_id,
             target_id=target_message.message_id,
             run_at=run_at
@@ -525,4 +525,3 @@ async def antiword_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await delete_and_reply(update, "Unknown command. Use `/antiword [on/off/add/remove/list]`")
-
