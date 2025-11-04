@@ -42,33 +42,47 @@ def parse_duration(text: str) -> timedelta | None:
         
     return None # Invalid format
 
-# --- Helper Functions (unchanged) ---
+# --- (FIXED) Helper Function ---
 
 async def delete_and_reply(update: Update, text: str, parse_mode: str = None):
     """
-    1. Deletes the user's triggering command.
+    Smarter reply function.
+    1. Deletes user's command (but ONLY in a group).
     2. Sends a new reply from the bot.
-    3. Deletes the bot's reply after 5 seconds.
+    3. Deletes the bot's reply after 5 seconds (but ONLY in a group).
     """
-    try:
-        await update.message.delete()
-    except Exception as e:
-        logger.warning(f"Failed to delete user's command message: {e}")
+    # --- (THE FIX IS HERE) ---
+    is_private = update.message.chat.type == 'private'
+    
+    # 1. Only delete user's command if in a group
+    if not is_private:
+        try:
+            await update.message.delete()
+        except Exception as e:
+            logger.warning(f"Failed to delete user's command message: {e}")
+    # --- (END OF FIX 1) ---
 
+    # 2. Send the reply
     try:
         sent_message = await update.message.reply_text(text=text, parse_mode=parse_mode)
     except Exception as e:
         logger.error(f"Failed to send reply message: {e}")
         return
     
-    await asyncio.sleep(5)
-    
-    try:
-        await sent_message.delete()
-    except Exception as e:
-        logger.warning(f"Failed to auto-delete bot reply: {e}")
+    # 3. Only auto-delete bot's reply if in a group
+    # --- (THE FIX IS HERE) ---
+    if not is_private:
+        await asyncio.sleep(5)
+        
+        try:
+            await sent_message.delete()
+        except Exception as e:
+            logger.warning(f"Failed to auto-delete bot reply: {e}")
+    # --- (END OF FIX 2) ---
+
 
 async def is_admin(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Checks if a user is an admin (Super Admin or Group Admin)."""
     if user_id in config.ADMIN_IDS_SET:
         return True
     try:
@@ -81,37 +95,46 @@ async def is_admin(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TYP
     return False
 
 async def is_group_chat(update: Update) -> bool:
+    """Checks if the command was used in a group. If not, sends a reply."""
     if update.message.chat.type in ['group', 'supergroup']:
         return True
+    # This will now correctly send and *keep* the error message in a private chat
     await delete_and_reply(update, "This command must be used in a group chat.")
     return False
 
-# --- Command Handlers (Blacklist ones unchanged) ---
+# --- Command Handlers ---
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the /start command."""
     start_message = (
         "Hello! I am your new moderation bot.\n"
         "I am ready to protect this group.\n\n"
-        "If you are a group admin, you can use these commands *in this chat*:\n"
+        "If you are a group admin, you can use these commands *in a group*:\n"
         "• `/addblacklist [term]` - Add a term to the ban list\n"
         "• `/removeblacklist [term]` - Remove a term\n"
         "• `/listblacklist` - See all banned terms\n"
         "• `/silent [duration]` - (Reply) Mute a user\n"
         "• `/pin [duration]` - (Reply) Pin a message"
     )
+    # This will now correctly send and *keep* the /start message in a private chat
     await delete_and_reply(update, start_message, parse_mode=ParseMode.MARKDOWN)
 
 async def add_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Adds a term to the group's blacklist."""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
+    
     if not await is_group_chat(update): return
     if not await is_admin(user_id, chat_id, context):
         await delete_and_reply(update, "You must be a group admin to use this command.")
         return
+        
     if not context.args:
         await delete_and_reply(update, "Usage: /addblacklist [term]")
         return
+        
     term = " ".join(context.args).lower()
+    
     try:
         success = await asyncio.to_thread(add_to_blacklist, chat_id, term)
         if success:
@@ -123,16 +146,21 @@ async def add_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TY
         await delete_and_reply(update, "An error occurred while adding the term.")
 
 async def remove_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Removes a term from the group's blacklist."""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
+    
     if not await is_group_chat(update): return
     if not await is_admin(user_id, chat_id, context):
         await delete_and_reply(update, "You must be a group admin to use this command.")
         return
+        
     if not context.args:
         await delete_and_reply(update, "Usage: /removeblacklist [term]")
         return
+        
     term = " ".join(context.args).lower()
+    
     try:
         success = await asyncio.to_thread(remove_from_blacklist, chat_id, term)
         if success:
@@ -144,27 +172,34 @@ async def remove_blacklist_command(update: Update, context: ContextTypes.DEFAULT
         await delete_and_reply(update, "An error occurred while removing the term.")
 
 async def list_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Lists all terms on the group's blacklist."""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
+    
     if not await is_group_chat(update): return
     if not await is_admin(user_id, chat_id, context):
         await delete_and_reply(update, "You must be a group admin to use this command.")
         return
+        
     try:
         terms = await asyncio.to_thread(get_blacklist, chat_id)
         if not terms:
             await delete_and_reply(update, "This group's blacklist is currently empty.")
             return
+            
         message = "<b>Current Blacklisted Terms for this Group:</b>\n\n"
         for term in terms:
             escaped_term = html.escape(str(term)) 
             message += f"• <code>{escaped_term}</code>\n"
+            
         await delete_and_reply(update, message, parse_mode=ParseMode.HTML)
+        
     except Exception as e:
         logger.error(f"Error in list_blacklist_command: {e}")
         await delete_and_reply(update, "An error occurred while fetching the blacklist.")
 
-# --- (UPDATED COMMAND 1) ---
+# --- (NEW) Job-based Commands ---
+
 async def silent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """(Admin) Mutes a user and schedules a persistent unmute job."""
     user_id = update.effective_user.id
@@ -213,13 +248,16 @@ async def silent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error in silent_command: {e}")
         await delete_and_reply(update, f"Failed to mute user. Error: {e}")
 
-# --- (UPDATED COMMAND 2) ---
 async def pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """(Admin) Pins a message and schedules a persistent unpin job."""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     
     if not await is_group_chat(update): return
+    
+    # --- (Silent Fail Logic) ---
+    # We want /pin to be silent, so we just delete the command if
+    # it's not by an admin or not a reply.
     if not await is_admin(user_id, chat_id, context):
         try: await update.message.delete()
         except Exception: pass
@@ -237,6 +275,7 @@ async def pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try: await update.message.delete()
         except Exception: pass
         return
+    # --- (End Silent Fail Logic) ---
 
     try:
         # 1. Pin the message silently
@@ -263,5 +302,6 @@ async def pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"Error in pin_command: {e}")
+        # Still try to delete the command on failure
         try: await update.message.delete()
         except Exception: pass
