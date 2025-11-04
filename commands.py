@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from telegram import Update, ChatPermissions, ChatMember
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
+# --- (CRITICAL FIX: CORRECT IMPORTS LIST) ---
 from database import (
     add_to_blacklist, 
     remove_from_blacklist, 
@@ -19,8 +20,9 @@ from database import (
     add_antilink_whitelist,
     remove_antilink_whitelist,
     get_antilink_whitelist,
-    set_welcome_message 
+    set_welcome_message
 )
+# --- (END OF FIX) ---
 import config
 
 logger = logging.getLogger(__name__)
@@ -138,6 +140,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• `/antilink [on/off]` - Toggle link deletion.\n"
         "• `/antiword [on/off]` - Toggle bad word deletion.\n"
         "• `/welcome [on/off]` - Toggle welcome messages.\n"
+        "• `/invite` - Get the group invite link.\n"
         "\n**Content Setup:**\n"
         "• `/setwelcome [message]` - Set the welcome message.\n"
         "• `/antiword add [word]` - Add a word to filter.\n"
@@ -145,12 +148,35 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "\n**Blacklist Commands:**\n"
         "• `/addblacklist [term]` - Ban a name/username.\n"
         "• `/removeblacklist [term]` - Unban a name/username.\n"
-        "\n**List Commands:**\n"
+        "\n**Moderation Actions:**\n"
         "• `/listblacklist` - Show banned name list.\n"
         "• `/antiword list` - Show filtered word list.\n"
         "• `/antilink list` - Show allowed domain list."
     )
     await delete_and_reply(update, start_message, parse_mode=ParseMode.MARKDOWN)
+
+# --- (NEW) /invite Command ---
+
+async def invite_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Gets the primary group invite link."""
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    
+    if not await is_group_chat(update): return
+    if not await is_admin(user_id, chat_id, context):
+        await delete_and_reply(update, "You must be a group admin to use this command.")
+        return
+        
+    try:
+        # 1. Get the primary invite link
+        invite_link = await context.bot.export_chat_invite_link(chat_id)
+        
+        # 2. Send the link
+        await delete_and_reply(update, f"Your group invite link is:\n<code>{invite_link}</code>", parse_mode=ParseMode.HTML)
+        
+    except Exception as e:
+        logger.error(f"Error in invite_command: {e}", exc_info=True)
+        await delete_and_reply(update, "Failed to get invite link. Do I have 'Invite Users via link' permission?")
 
 # --- (NEW) /kick and /ban Commands ---
 
@@ -168,15 +194,15 @@ async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     target_user = update.message.reply_to_message.from_user
-    target_user_id = target_user.id
     
     try:
-        # 1. Kick the user (this automatically deletes their last 48 hours of messages)
+        # 1. Kick the user (ban for 30 seconds to force kick)
+        # revoke_messages=True deletes messages for the last 48 hours!
         await context.bot.ban_chat_member(
             chat_id=chat_id,
-            user_id=target_user_id,
-            until_date=datetime.now(timezone.utc) + timedelta(seconds=30), # Temp ban to force kick
-            revoke_messages=True # <-- Deletes messages for the last 48 hours!
+            user_id=target_user.id,
+            until_date=datetime.now(timezone.utc) + timedelta(seconds=30), 
+            revoke_messages=True
         )
         
         # 2. Send confirmation
@@ -184,7 +210,7 @@ async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"Error in kick_command: {e}", exc_info=True)
-        await delete_and_reply(update, f"Failed to kick user. Check bot permissions.")
+        await delete_and_reply(update, f"Failed to kick user. Check bot permissions (Ban Users, Delete Messages).")
 
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """(Admin) Bans a user (permanently or temporarily)."""
@@ -219,7 +245,6 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             until_date = None
             message = f"User {html.escape(target_user.full_name)} has been banned permanently."
         
-        # Ban the user
         await context.bot.ban_chat_member(
             chat_id=chat_id,
             user_id=target_user.id,
@@ -227,7 +252,6 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             revoke_messages=False 
         )
         
-        # Send confirmation
         await delete_and_reply(update, message)
         
     except Exception as e:
@@ -235,9 +259,10 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await delete_and_reply(update, f"Failed to ban user. Check bot permissions.")
 
 
-# --- Existing Commands (Abbreviated for brevity, but full code is in final file) ---
+# --- (EXISTING COMMANDS) ---
 
 async def add_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Adds a term to the group's blacklist."""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     
@@ -263,6 +288,7 @@ async def add_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TY
         await delete_and_reply(update, "An error occurred while adding the term.")
 
 async def remove_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Removes a term from the group's blacklist."""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     
@@ -288,6 +314,7 @@ async def remove_blacklist_command(update: Update, context: ContextTypes.DEFAULT
         await delete_and_reply(update, "An error occurred while removing the term.")
 
 async def list_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Lists all terms on the group's blacklist."""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     
@@ -314,6 +341,7 @@ async def list_blacklist_command(update: Update, context: ContextTypes.DEFAULT_T
         await delete_and_reply(update, "An error occurred while fetching the blacklist.")
 
 async def silent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Mutes a user using Telegram's built-in scheduler."""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     
@@ -357,6 +385,7 @@ async def silent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await delete_and_reply(update, f"Failed to mute user. Do I have 'Restrict Users' permission?")
 
 async def pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Pins a message and schedules a persistent unpin job."""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     
@@ -405,6 +434,7 @@ async def pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception: pass
 
 async def antibot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Toggles the anti-bot feature on or off."""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     
@@ -442,6 +472,7 @@ async def antibot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def antilink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Toggles /antilink or manages its whitelist."""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     
@@ -513,6 +544,7 @@ async def antilink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def antiword_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Toggles /antiword or manages its blacklist."""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     
