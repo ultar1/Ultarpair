@@ -30,7 +30,7 @@ def init_db():
                 );
             """)
             
-            # Job scheduling table (for unpin)
+            # Job scheduling table (for unpin and message deletion)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS scheduled_jobs (
                     id SERIAL PRIMARY KEY,
@@ -44,13 +44,9 @@ def init_db():
                 CREATE INDEX IF NOT EXISTS idx_jobs_run_at ON scheduled_jobs (run_at);
             """)
             
-            # --- (TABLES FOR NEW FEATURES) ---
+            # --- (GROUP SETTINGS) ---
             
-            # 1. Drop the old simple group_settings table if it exists
-            # This ensures we get the new columns (welcome_message, etc.)
-            cur.execute("DROP TABLE IF EXISTS group_settings;")
-
-            # 2. Create the new, complete group_settings table
+            # CRITICAL FIX: DO NOT DROP THIS TABLE AGAIN. If it exists, we just ensure it has the necessary columns.
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS group_settings (
                     chat_id BIGINT PRIMARY KEY,
@@ -64,7 +60,8 @@ def init_db():
                 );
             """)
             
-            # 3. Create the new antiword_blacklist table
+            # --- (TABLES FOR FILTERS) ---
+            
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS antiword_blacklist (
                     id SERIAL PRIMARY KEY,
@@ -74,7 +71,6 @@ def init_db():
                 );
             """)
         
-            # 4. Create the new antilink_whitelist table
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS antilink_whitelist (
                     id SERIAL PRIMARY KEY,
@@ -84,7 +80,6 @@ def init_db():
                 );
             """)
         
-            # 5. Create the new user_warnings table
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS user_warnings (
                     id SERIAL PRIMARY KEY,
@@ -154,7 +149,8 @@ def get_blacklist(chat_id: int) -> set:
 def add_job(job_type: str, chat_id: int, target_id: int, run_at: 'datetime') -> bool:
     """Adds a new job to the database."""
     
-    if job_type not in ['unpin']: # Only unpin jobs are stored here
+    # We now allow 'delete_message' for welcome message cleanup
+    if job_type not in ['unpin', 'delete_message']: 
         logger.error(f"Invalid job_type: {job_type}")
         return False
         
@@ -174,10 +170,10 @@ def add_job(job_type: str, chat_id: int, target_id: int, run_at: 'datetime') -> 
         conn.close()
 
 def get_due_jobs() -> list['psycopg2.extras.DictRow']:
-    """Gets all due 'unpin' jobs."""
+    """Gets all due 'unpin' and 'delete_message' jobs."""
     sql = """
         SELECT * FROM scheduled_jobs 
-        WHERE run_at <= NOW() AND job_type = 'unpin'
+        WHERE run_at <= NOW() AND job_type IN ('unpin', 'delete_message')
         ORDER BY run_at 
         FOR UPDATE SKIP LOCKED
     """
