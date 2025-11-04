@@ -21,13 +21,15 @@ from commands import (
     add_blacklist_command,
     remove_blacklist_command,
     silent_command,
-   antibot_command,
+    antibot_command,
     pin_command,
-   antilink_command,
-   antiword_command,
-  list_blacklist_command
+    antilink_command,
+    antiword_command,
+    list_blacklist_command,
+    welcome_command,     # <-- ADDED
+    setwelcome_command   # <-- ADDED
 )
-from moderation import check_new_member
+from moderation import check_new_member, handle_message # <-- ADDED handle_message
 
 # Set up logging
 logging.basicConfig(
@@ -56,16 +58,34 @@ async def setup_bot():
     await asyncio.to_thread(init_db)
     
     logger.info("Registering handlers...")
+    
+    # --- (THIS IS THE FIX) ---
+    # All handlers are now in one place with correct indentation.
+    
+    # Command Handlers (group 0)
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("addblacklist", add_blacklist_command))
     application.add_handler(CommandHandler("removeblacklist", remove_blacklist_command))
     application.add_handler(CommandHandler("listblacklist", list_blacklist_command))
     application.add_handler(CommandHandler("silent", silent_command))
     application.add_handler(CommandHandler("pin", pin_command))
-    application.add_handler(CommandHandler("antilink", antilink_command))  # <-- NEW
-    application.add_handler(CommandHandler("antiword", antiword_command)) # <-- Your error was here
+    application.add_handler(CommandHandler("antilink", antilink_command))
+    application.add_handler(CommandHandler("antiword", antiword_command))
     application.add_handler(CommandHandler("antibot", antibot_command)) 
+    application.add_handler(CommandHandler("welcome", welcome_command))     # <-- ADDED
+    application.add_handler(CommandHandler("setwelcome", setwelcome_command))   # <-- ADDED
+
+    # Chat Member Handler (group 0)
     application.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
+
+    # Message Handler (group 1 - runs after commands)
+    # This is the block that was floating and causing the crash.
+    # It now correctly checks for text in groups that are not commands.
+    application.add_handler(MessageHandler(
+        filters.TEXT & (~filters.COMMAND) & (filters.ChatType.GROUPS), 
+        handle_message
+    ), group=1)
+    # --- (END OF FIX) ---
 
     logger.info("Initializing Telegram Application...")
     await application.initialize()
@@ -73,16 +93,6 @@ async def setup_bot():
     # We no longer call set_webhook here. The main() function will do it.
 
 
-# --- (THIS IS THE FIX) ---
-        # --- (NEW) Message Handler ---
-        # This runs for *all* messages that are not commands
-        # The 'group=1' means it runs *after* the command handlers (group=0)
-        application.add_handler(MessageHandler(
-            filters.TEXT & (~filters.COMMAND) & (filters.ChatType.GROUPS), 
-            handle_message
-        ), group=1)
-        # --- (END OF FIX) ---
-        
 # --- Main function to start the bot ---
 async def main():
     """Set up and run the bot's webhook server."""
@@ -135,4 +145,3 @@ if __name__ == "__main__":
     logger.info("Starting bot...")
     # This creates the loop and runs our main function
     asyncio.run(main())
-
