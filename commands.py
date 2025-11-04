@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from telegram import Update, ChatPermissions
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
-# --- (CRITICAL FIX: Removed old, non-existent database imports) ---
+# --- (CRITICAL FIX: Correct database imports for all features) ---
 from database import (
     add_to_blacklist, 
     remove_from_blacklist, 
@@ -20,7 +20,7 @@ from database import (
     add_antilink_whitelist,
     remove_antilink_whitelist,
     get_antilink_whitelist,
-    set_welcome_message  # <-- ADDED FOR WELCOME
+    set_welcome_message  # <-- New Welcome Setter
 )
 # --- (END OF FIX) ---
 import config
@@ -142,9 +142,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• `/antibot [on/off]` - Toggle bot kicking.\n"
         "• `/antilink [on/off]` - Toggle link deletion.\n"
         "• `/antiword [on/off]` - Toggle bad word deletion.\n"
-        "• 👋 `/welcome [on/off]` - Toggle welcome messages.\n" # <-- NEW
+        "• 👋 `/welcome [on/off]` - Toggle welcome messages.\n"
         "\n**Content Setup:**\n"
-        "• `/setwelcome [message]` - Set the welcome message.\n" # <-- NEW
+        "• `/setwelcome [message]` - Set the welcome message.\n"
         "• `/antiword add [word]` - Add a word to filter.\n"
         "• `/antilink allow [url]` - Allow a domain.\n"
         "\n**Blacklist Commands:**\n"
