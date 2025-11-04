@@ -73,6 +73,16 @@ async def setup_bot():
     # We no longer call set_webhook here. The main() function will do it.
 
 
+# --- (THIS IS THE FIX) ---
+        # --- (NEW) Message Handler ---
+        # This runs for *all* messages that are not commands
+        # The 'group=1' means it runs *after* the command handlers (group=0)
+        application.add_handler(MessageHandler(
+            filters.TEXT & (~filters.COMMAND) & (filters.ChatType.GROUPS), 
+            handle_message
+        ), group=1)
+        # --- (END OF FIX) ---
+        
 # --- Main function to start the bot ---
 async def main():
     """Set up and run the bot's webhook server."""
