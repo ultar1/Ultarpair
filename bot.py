@@ -99,6 +99,37 @@ async def setup_bot():
     # We no longer call set_webhook here. The main() function will do it.
 
 
+
+# --- NEW: Self-Ping Loop ---
+async def ping_self_loop():
+    """Pings a service every 6 minutes to prevent the app from spinning down."""
+    # Ping interval in seconds (6 minutes = 360 seconds)
+    PING_INTERVAL = 6 * 60 
+    
+    # The URL to ping is the bot's own webhook URL (or health check endpoint)
+    ping_url = f"{config.WEBHOOK_URL}/" 
+
+    # We use httpx for async HTTP requests
+    import httpx 
+
+    logger.info("Self-ping worker started.")
+
+    # Wait for a short while before the first ping to let the server start
+    await asyncio.sleep(5) 
+
+    while True:
+        try:
+            logger.info(f"Pinging self at {ping_url} to stay alive...")
+            async with httpx.AsyncClient(timeout=10) as client:
+                # We send a simple GET request to the health check endpoint
+                response = await client.get(ping_url)
+                logger.info(f"Self-ping successful. Status: {response.status_code}")
+        except Exception as e:
+            logger.error(f"Self-ping FAILED: {e}")
+            
+        await asyncio.sleep(PING_INTERVAL)
+
+
 # --- Main function to start the bot ---
 async def main():
     """Set up and run the bot's webhook server."""
