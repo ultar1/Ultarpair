@@ -7,6 +7,8 @@ from telegram.ext import (
     CommandHandler,
     ChatMemberHandler,
     ContextTypes,
+    filters,
+    MessageHandler
 )
 
 # Import config (which loads env vars) and database functions
@@ -21,7 +23,9 @@ from commands import (
     silent_command,
    antibot_command,
     pin_command,
-    list_blacklist_command
+   antilink_command,
+   antiword_command,
+  list_blacklist_command
 )
 from moderation import check_new_member
 
@@ -58,6 +62,8 @@ async def setup_bot():
     application.add_handler(CommandHandler("listblacklist", list_blacklist_command))
     application.add_handler(CommandHandler("silent", silent_command))
     application.add_handler(CommandHandler("pin", pin_command))
+    application.add_handler(CommandHandler("antilink", antilink_command))  # <-- NEW
+     application.add_handler(CommandHandler("antiword", antiword_command))  # <-- NEW
     application.add_handler(CommandHandler("antibot", antibot_command)) 
     application.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
 
