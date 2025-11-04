@@ -129,7 +129,7 @@ async def add_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         success = await asyncio.to_thread(add_to_blacklist, chat_id, term)
         if success:
-            await delete_and_reply(update, f"✅ Added '<code>{html.escape(term)}</code>' to this group's blacklist.", parse_mode=ParseMode.HTML)
+            await delete_and_reply(update, f"Added '<code>{html.escape(term)}</code>' to this group's blacklist.", parse_mode=ParseMode.HTML)
         else:
             await delete_and_reply(update, f"'<code>{html.escape(term)}</code>' is already on this group's blacklist.", parse_mode=ParseMode.HTML)
     except Exception as e:
@@ -155,7 +155,7 @@ async def remove_blacklist_command(update: Update, context: ContextTypes.DEFAULT
     try:
         success = await asyncio.to_thread(remove_from_blacklist, chat_id, term)
         if success:
-            await delete_and_reply(update, f"✅ Removed '<code>{html.escape(term)}</code>' from this group's blacklist.", parse_mode=ParseMode.HTML)
+            await delete_and_reply(update, f"Removed '<code>{html.escape(term)}</code>' from this group's blacklist.", parse_mode=ParseMode.HTML)
         else:
             await delete_and_reply(update, f"'<code>{html.escape(term)}</code>' was not found on this group's blacklist.", parse_mode=ParseMode.HTML)
     except Exception as e:
@@ -235,7 +235,7 @@ async def silent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         # 4. Send confirmation
-        await delete_and_reply(update, f"🔇 User {html.escape(target_user.full_name)} has been muted for {duration_text}.")
+        await delete_and_reply(update, f"User {html.escape(target_user.full_name)} has been muted for {duration_text}.")
         
     except Exception as e:
         logger.error(f"Error in silent_command: {e}", exc_info=True) # Added exc_info for more details
