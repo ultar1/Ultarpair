@@ -20,6 +20,8 @@ from commands import (
     start_command,
     add_blacklist_command,
     remove_blacklist_command,
+    silent_command,
+    pin_command,
     list_blacklist_command
 )
 from moderation import check_new_member
@@ -113,6 +115,8 @@ if __name__ != "__main__":
         application.add_handler(CommandHandler("addblacklist", add_blacklist_command))
         application.add_handler(CommandHandler("removeblacklist", remove_blacklist_command))
         application.add_handler(CommandHandler("listblacklist", list_blacklist_command))
+        application.add_handler(CommandHandler("silent", silent_command)) # <-- ADD THIS
+        application.add_handler(CommandHandler("pin", pin_command))       # <-- ADD THIS
         application.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
 
         # 2. Get the main event loop
