@@ -57,17 +57,14 @@ def create_application() -> Application:
     # 2. Build the application
     try:
         builder = Application.builder().token(config.TOKEN)
-        
-        # 3. (FIX) Set webhook settings *during build*
-        webhook_url = f"{config.WEBHOOK_URL}/webhook"
-        
-        # --- Webhook secret token has been removed ---
-        builder.webhook(
-            url=webhook_url,
-            allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER]
-        )
-        
         application = builder.build()
+        
+        # 3. (THIS IS THE FIX)
+        # Set the webhook properties *after* building.
+        # The library will automatically call set_webhook() on startup.
+        application.webhook_url = f"{config.WEBHOOK_URL}/webhook"
+        application.allowed_updates = [Update.MESSAGE, Update.CHAT_MEMBER]
+        
         logger.info("Telegram Application built successfully.")
 
     except Exception as e:
@@ -84,11 +81,9 @@ def create_application() -> Application:
     application.add_handler(CommandHandler("pin", pin_command))
     application.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
 
-    # 5. (FIX) Add the health check as an HTTP route
+    # 5. Add the health check as an HTTP route
     # This tells PTB to answer GET requests on "/"
     application.add_route_handler("/", health_check)
-    
-    # --- The secret token check handler has been removed ---
 
     logger.info("Application setup complete.")
     return application
@@ -96,11 +91,11 @@ def create_application() -> Application:
 # --- Create the app for Gunicorn ---
 # This block runs when Gunicorn imports the file
 if __name__ != "__main__":
-    # --- Removed WEBHOOK_SECRET from this check ---
     if not all([config.TOKEN, config.DATABASE_URL, config.WEBHOOK_URL]):
         logger.critical("!!! ERROR: Missing TOKEN, DATABASE_URL, or WEBHOOK_URL. !!!")
         exit(1)
     else:
         logger.info("All environment variables seem to be set.")
+        # This is the variable Gunicorn will look for
         application = create_application()
         logger.info("ASGI application created. Ready for Gunicorn.")
