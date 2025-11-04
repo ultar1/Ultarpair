@@ -66,7 +66,6 @@ async def setup_bot():
 
 
 # --- Main function to start the bot ---
-# --- Main function to start the bot ---
 async def main():
     """Set up and run the bot's webhook server."""
     
@@ -82,13 +81,32 @@ async def main():
     
     logger.info(f"Starting webhook server on 0.0.0.0:{PORT}")
     
-    # This is the corrected call, without the health_check arguments
-    await application.run_webhook(
+    # 1. Start the webhook server (this runs in the background)
+    await application.updater.start_webhook(
         listen="0.0.0.0",
         port=PORT,
+        url_path="webhook", # We just need the path here
         webhook_url=WEBHOOK_URL,
         allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER]
     )
+    
+    # 2. Start the application logic (processing updates)
+    await application.start()
+    
+    # 3. Wait forever until the process is stopped (e.g., by Render)
+    # This prevents the script from exiting.
+    try:
+        await asyncio.Event().wait()
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Bot shutting down (received signal)...")
+    finally:
+        # 4. Gracefully shut down when stopped
+        logger.info("Stopping webhook...")
+        await application.updater.stop()
+        logger.info("Stopping application...")
+        await application.stop()
+        logger.info("Bot shut down complete.")
+
 
 if __name__ == "__main__":
     # Check for essential env vars first
@@ -97,5 +115,6 @@ if __name__ == "__main__":
         exit(1)
     
     logger.info("Starting bot...")
+    # This creates the loop and runs our main function
     asyncio.run(main())
 
