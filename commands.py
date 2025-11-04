@@ -112,7 +112,7 @@ async def add_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TY
         
         if success:
             # --- (UPDATED) ---
-            await delete_and_reply(update, f"✅ Added '<code>{html.escape(term)}</code>' to this group's blacklist.", parse_mode=ParseMode.HTML)
+            await delete_and_reply(update, f"Added '<code>{html.escape(term)}</code>' to this group's blacklist.", parse_mode=ParseMode.HTML)
         else:
             # --- (UPDATED) ---
             await delete_and_reply(update, f"'<code>{html.escape(term)}</code>' is already on this group's blacklist.", parse_mode=ParseMode.HTML)
@@ -145,7 +145,7 @@ async def remove_blacklist_command(update: Update, context: ContextTypes.DEFAULT
         
         if success:
             # --- (UPDATED) ---
-            await delete_and_reply(update, f"✅ Removed '<code>{html.escape(term)}</code>' from this group's blacklist.", parse_mode=ParseMode.HTML)
+            await delete_and_reply(update, f"Removed '<code>{html.escape(term)}</code>' from this group's blacklist.", parse_mode=ParseMode.HTML)
         else:
             # --- (UPDATED) ---
             await delete_and_reply(update, f"'<code>{html.escape(term)}</code>' was not found on this group's blacklist.", parse_mode=ParseMode.HTML)
