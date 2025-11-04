@@ -63,7 +63,7 @@ async def setup_bot():
     application.add_handler(CommandHandler("silent", silent_command))
     application.add_handler(CommandHandler("pin", pin_command))
     application.add_handler(CommandHandler("antilink", antilink_command))  # <-- NEW
-     application.add_handler(CommandHandler("antiword", antiword_command))  # <-- NEW
+    application.add_handler(CommandHandler("antiword", antiword_command)) # <-- Your error was here
     application.add_handler(CommandHandler("antibot", antibot_command)) 
     application.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
 
