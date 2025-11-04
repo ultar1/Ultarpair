@@ -6,12 +6,16 @@ from datetime import datetime, timedelta, timezone
 from telegram import Update, ChatPermissions
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
+# --- (HERE ARE THE NEW IMPORTS) ---
 from database import (
     add_to_blacklist, 
     remove_from_blacklist, 
     get_blacklist, 
-    add_job
+    add_job,
+    set_antibot_status,  # <-- NEW
+    is_antibot_enabled   # <-- NEW
 )
+# --- (END OF NEW IMPORTS) ---
 import config
 
 # Set up logging
@@ -98,6 +102,7 @@ async def is_group_chat(update: Update) -> bool:
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the /start command."""
+    # --- (UPDATED START MESSAGE) ---
     start_message = (
         "Hello! I am your new moderation bot.\n"
         "I am ready to protect this group.\n\n"
@@ -106,8 +111,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• `/removeblacklist [term]` - Remove a term\n"
         "• `/listblacklist` - See all banned terms\n"
         "• `/silent [duration]` - (Reply) Mute a user\n"
-        "• `/pin [duration]` - (Reply) Pin a message"
+        "• `/pin [duration]` - (Reply) Pin a message\n"
+        "• `/antibot [on/off]` - Enable/disable anti-bot" # <-- NEW
     )
+    # --- (END OF UPDATE) ---
     await delete_and_reply(update, start_message, parse_mode=ParseMode.MARKDOWN)
 
 async def add_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -129,7 +136,7 @@ async def add_blacklist_command(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         success = await asyncio.to_thread(add_to_blacklist, chat_id, term)
         if success:
-            await delete_and_reply(update, f"Added '<code>{html.escape(term)}</code>' to this group's blacklist.", parse_mode=ParseMode.HTML)
+            await delete_and_reply(update, f"✅ Added '<code>{html.escape(term)}</code>' to this group's blacklist.", parse_mode=ParseMode.HTML)
         else:
             await delete_and_reply(update, f"'<code>{html.escape(term)}</code>' is already on this group's blacklist.", parse_mode=ParseMode.HTML)
     except Exception as e:
@@ -155,7 +162,7 @@ async def remove_blacklist_command(update: Update, context: ContextTypes.DEFAULT
     try:
         success = await asyncio.to_thread(remove_from_blacklist, chat_id, term)
         if success:
-            await delete_and_reply(update, f"Removed '<code>{html.escape(term)}</code>' from this group's blacklist.", parse_mode=ParseMode.HTML)
+            await delete_and_reply(update, f"✅ Removed '<code>{html.escape(term)}</code>' from this group's blacklist.", parse_mode=ParseMode.HTML)
         else:
             await delete_and_reply(update, f"'<code>{html.escape(term)}</code>' was not found on this group's blacklist.", parse_mode=ParseMode.HTML)
     except Exception as e:
@@ -189,7 +196,7 @@ async def list_blacklist_command(update: Update, context: ContextTypes.DEFAULT_T
         logger.error(f"Error in list_blacklist_command: {e}")
         await delete_and_reply(update, "An error occurred while fetching the blacklist.")
 
-# --- (NEW) Job-based Commands ---
+# --- Job-based Commands ---
 
 async def silent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """(Admin) Mutes a user and schedules a persistent unmute job."""
@@ -213,19 +220,14 @@ async def silent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     try:
-        # 1. Mute the user INDEFINITELY (the job will unmute them)
-        # --- (THIS IS THE FIX) ---
         await context.bot.restrict_chat_member(
             chat_id=chat_id,
             user_id=target_user.id,
-            permissions=ChatPermissions(can_send_messages=False) # No until_date
+            permissions=ChatPermissions(can_send_messages=False)
         )
-        # --- (END OF FIX) ---
         
-        # 2. Calculate the run_at time in UTC
         run_at = datetime.now(timezone.utc) + duration
         
-        # 3. Schedule the 'unmute' job in the database
         await asyncio.to_thread(
             add_job,
             job_type="unmute",
@@ -234,11 +236,10 @@ async def silent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             run_at=run_at
         )
         
-        # 4. Send confirmation
-        await delete_and_reply(update, f"User {html.escape(target_user.full_name)} has been muted for {duration_text}.")
+        await delete_and_reply(update, f"🔇 User {html.escape(target_user.full_name)} has been muted for {duration_text}.")
         
     except Exception as e:
-        logger.error(f"Error in silent_command: {e}", exc_info=True) # Added exc_info for more details
+        logger.error(f"Error in silent_command: {e}", exc_info=True)
         await delete_and_reply(update, f"Failed to mute user. Do I have 'Restrict Users' permission?")
 
 async def pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -248,7 +249,6 @@ async def pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not await is_group_chat(update): return
     
-    # --- (Silent Fail Logic) ---
     if not await is_admin(user_id, chat_id, context):
         try: await update.message.delete()
         except Exception: pass
@@ -266,20 +266,16 @@ async def pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try: await update.message.delete()
         except Exception: pass
         return
-    # --- (End Silent Fail Logic) ---
 
     try:
-        # 1. Pin the message silently
         await context.bot.pin_chat_message(
             chat_id=chat_id,
             message_id=target_message.message_id,
             disable_notification=True
         )
         
-        # 2. Calculate the run_at time in UTC
         run_at = datetime.now(timezone.utc) + duration
         
-        # 3. Schedule the 'unpin' job in the database
         await asyncio.to_thread(
             add_job,
             job_type="unpin",
@@ -288,11 +284,49 @@ async def pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             run_at=run_at
         )
         
-        # 4. Delete the admin's /pin command
         await update.message.delete()
         
     except Exception as e:
-        logger.error(f"Error in pin_command: {e}", exc_info=True) # Added exc_info for more details
-        # Still try to delete the command on failure
+        logger.error(f"Error in pin_command: {e}", exc_info=True)
         try: await update.message.delete()
         except Exception: pass
+
+# --- (NEW /antibot COMMAND) ---
+async def antibot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Admin) Toggles the anti-bot feature on or off."""
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    
+    if not await is_group_chat(update): return
+    if not await is_admin(user_id, chat_id, context):
+        await delete_and_reply(update, "You must be a group admin to use this command.")
+        return
+        
+    if not context.args or context.args[0].lower() not in ['on', 'off']:
+        # Check current status if no args given
+        try:
+            current_status = await asyncio.to_thread(is_antibot_enabled, chat_id)
+            status_str = "ON" if current_status else "OFF"
+            await delete_and_reply(update, f"Usage: `/antibot on` or `/antibot off`\n(Current status is: **{status_str}**)")
+        except Exception as e:
+            logger.error(f"Error checking antibot status: {e}")
+            await delete_and_reply(update, "Usage: `/antibot on` or `/antibot off`")
+        return
+        
+    new_status_str = context.args[0].lower()
+    new_status_bool = True if new_status_str == 'on' else False
+    
+    try:
+        success = await asyncio.to_thread(set_antibot_status, chat_id, new_status_bool)
+        if success:
+            if new_status_bool:
+                await delete_and_reply(update, "✅ Anti-bot feature has been **enabled**.")
+            else:
+                await delete_and_reply(update, "❌ Anti-bot feature has been **disabled**.")
+        else:
+            await delete_and_reply(update, "Failed to update anti-bot status. Check logs.")
+            
+    except Exception as e:
+        logger.error(f"Error in antibot_command: {e}")
+        await delete_and_reply(update, "An error occurred while setting anti-bot status.")
+# --- (END OF NEW COMMAND) ---
