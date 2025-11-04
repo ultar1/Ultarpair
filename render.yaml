@@ -3,16 +3,16 @@
 # 2. The 'worker' service for running the scheduler.
 
 services:
-  # Service 1: The Webhook Server (your main.py)
+  # Service 1: The Webhook Server (your bot.py)
   - type: web
     name: bot-web
     env: python
     # This command runs when you deploy
     buildCommand: "pip install -r requirements.txt"
     # This command starts your bot
-    # *** IMPORTANT: Make sure this points to your main file and the 'application' variable ***
-    startCommand: "gunicorn -k uvicorn.workers.UvicornWorker main:application"
-    # This is the health check route we built in main.py
+    # *** IT NOW POINTS TO bot.py and the 'application' variable ***
+    startCommand: "gunicorn -k uvicorn.workers.UvicornWorker bot:application"
+    # This is the health check route we built in bot.py
     healthCheck:
       path: /
     envVars:
@@ -22,11 +22,9 @@ services:
       - key: BOT_TOKEN
         sync: false # Paste your bot token here
       
-      # --- WEBHOOK_SECRET has been removed ---
-      
       # --- These are set automatically or are safe ---
       - key: ADMIN_IDS
-        value: "7302005705" # This is safe to keep here
+        value: "7302005705"
       - key: WEBHOOK_URL
         fromService:
           type: web
