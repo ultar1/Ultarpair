@@ -1,28 +1,26 @@
 import psycopg2
 import logging
-import psycopg2.extras # <-- This is good, we'll keep it.
+import psycopg2.extras 
 from config import DATABASE_URL
-from datetime import datetime # <-- Import this
+from datetime import datetime 
 
 logger = logging.getLogger(__name__)
 
 def get_db_connection():
     """Establishes a connection to the database."""
     try:
-        # Use a dictionary cursor to get results as dicts
         conn = psycopg2.connect(DATABASE_URL)
-        # We'll use the cursor_factory on a per-cursor basis instead
         return conn
     except psycopg2.OperationalError as e:
         logger.error(f"Error connecting to database: {e}")
         raise
+
 def init_db():
     """Initializes the database and creates tables if they don't exist."""
     conn = get_db_connection()
     try:
-        # Use a *standard* cursor for DDL (CREATE TABLE) commands
         with conn.cursor() as cur:
-            # Blacklist table (unchanged)
+            # Blacklist table
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS blacklist (
                     id SERIAL PRIMARY KEY,
@@ -32,26 +30,24 @@ def init_db():
                 );
             """)
             
-            # Job scheduling table (unchanged, but we will use it less)
+            # Job scheduling table (for unpin)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS scheduled_jobs (
                     id SERIAL PRIMARY KEY,
-                    job_type TEXT NOT NULL,          -- e.g., 'unpin'
+                    job_type TEXT NOT NULL,
                     chat_id BIGINT NOT NULL,
-                    target_id BIGINT NOT NULL,       -- message_id for unpin
-                    run_at TIMESTAMPTZ NOT NULL      -- 'timestamp with time zone'
+                    target_id BIGINT NOT NULL,
+                    run_at TIMESTAMPTZ NOT NULL
                 );
             """)
-
-            # Create an index for faster job polling
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_jobs_run_at ON scheduled_jobs (run_at);
             """)
             
-            # --- (THIS IS THE BIG UPDATE) ---
+            # --- (TABLES FOR NEW FEATURES) ---
             
             # 1. Drop the old simple group_settings table if it exists
-            # We are replacing it with a much better one.
+            # This ensures we get the new columns (welcome_message, etc.)
             cur.execute("DROP TABLE IF EXISTS group_settings;")
 
             # 2. Create the new, complete group_settings table
@@ -62,7 +58,9 @@ def init_db():
                     antilink_enabled BOOLEAN DEFAULT FALSE,
                     antiword_enabled BOOLEAN DEFAULT FALSE,
                     antilink_warn_limit SMALLINT DEFAULT 3,
-                    antiword_warn_limit SMALLINT DEFAULT 3
+                    antiword_warn_limit SMALLINT DEFAULT 3,
+                    welcome_enabled BOOLEAN DEFAULT FALSE,  
+                    welcome_message TEXT DEFAULT NULL       
                 );
             """)
             
@@ -97,7 +95,6 @@ def init_db():
                     UNIQUE(chat_id, user_id, warn_type)
                 );
             """)
-            # --- (END OF UPDATE) ---
             
             conn.commit()
             logger.info("Database tables initialized/verified.")
@@ -105,7 +102,8 @@ def init_db():
         logger.critical(f"Failed to initialize database: {e}")
     finally:
         conn.close()
-# --- Blacklist Functions (Unchanged) ---
+
+# --- Blacklist Functions ---
 
 def add_to_blacklist(chat_id: int, term: str) -> bool:
     sql = "INSERT INTO blacklist (chat_id, term) VALUES (%s, %s) ON CONFLICT (chat_id, term) DO NOTHING"
@@ -141,9 +139,9 @@ def get_blacklist(chat_id: int) -> set:
     sql = "SELECT term FROM blacklist WHERE chat_id = %s"
     conn = get_db_connection()
     try:
-        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur: # Using your DictCursor
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
             cur.execute(sql, (chat_id,))
-            results = {row['term'] for row in cur.fetchall()} # Access by name
+            results = {row['term'] for row in cur.fetchall()} 
             return results
     except Exception as e:
         logger.error(f"Error getting blacklist: {e}")
@@ -151,13 +149,12 @@ def get_blacklist(chat_id: int) -> set:
     finally:
         conn.close()
 
-# --- (UPDATED) Job Functions ---
+# --- Job Functions ---
 
 def add_job(job_type: str, chat_id: int, target_id: int, run_at: 'datetime') -> bool:
     """Adds a new job to the database."""
     
-    # --- (THIS IS THE FIX: "unmute" is no longer a valid job) ---
-    if job_type not in ['unpin']:
+    if job_type not in ['unpin']: # Only unpin jobs are stored here
         logger.error(f"Invalid job_type: {job_type}")
         return False
         
@@ -177,12 +174,7 @@ def add_job(job_type: str, chat_id: int, target_id: int, run_at: 'datetime') -> 
         conn.close()
 
 def get_due_jobs() -> list['psycopg2.extras.DictRow']:
-    """
-    Gets all due 'unpin' jobs.
-    Uses 'FOR UPDATE SKIP LOCKED' to prevent multiple workers from
-    grabbing the same job.
-    """
-    # --- (THIS IS THE FIX: We only select 'unpin' jobs) ---
+    """Gets all due 'unpin' jobs."""
     sql = """
         SELECT * FROM scheduled_jobs 
         WHERE run_at <= NOW() AND job_type = 'unpin'
@@ -191,11 +183,10 @@ def get_due_jobs() -> list['psycopg2.extras.DictRow']:
     """
     conn = get_db_connection()
     try:
-        # Use your DictCursor here
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
             cur.execute(sql)
             jobs = cur.fetchall()
-            conn.commit() # Commit to release the lock on selected rows
+            conn.commit()
             return jobs
     except Exception as e:
         logger.error(f"Error getting due jobs: {e}")
@@ -218,7 +209,7 @@ def delete_job(job_id: int):
     finally:
         conn.close()
 
-# --- (NEW) Group Settings ---
+# --- Group Settings ---
 
 def set_group_setting(chat_id: int, setting: str, value) -> bool:
     """Dynamically sets a single group setting. Returns True on success."""
@@ -226,14 +217,13 @@ def set_group_setting(chat_id: int, setting: str, value) -> bool:
     # Allowlist of setting columns to prevent SQL injection
     allowed_settings = {
         "antibot_enabled", "antilink_enabled", "antiword_enabled", 
-        "antilink_warn_limit", "antiword_warn_limit"
+        "antilink_warn_limit", "antiword_warn_limit",
+        "welcome_enabled"  # <-- ADDED
     }
     if setting not in allowed_settings:
         logger.error(f"Invalid setting name: {setting}")
         return False
 
-    # This query will insert if not present, or update if it is.
-    # We use %s for values, but f-string for the column name (which is safe due to our allowlist)
     sql = f"""
         INSERT INTO group_settings (chat_id, {setting})
         VALUES (%s, %s)
@@ -253,6 +243,27 @@ def set_group_setting(chat_id: int, setting: str, value) -> bool:
     finally:
         conn.close()
 
+def set_welcome_message(chat_id: int, message: str) -> bool:
+    """Sets the welcome message for a group."""
+    sql = """
+        INSERT INTO group_settings (chat_id, welcome_message)
+        VALUES (%s, %s)
+        ON CONFLICT (chat_id)
+        DO UPDATE SET welcome_message = EXCLUDED.welcome_message;
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, (chat_id, message))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error in set_welcome_message: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
 def get_group_settings(chat_id: int) -> dict:
     """Gets all settings for a group. Returns a dict with defaults."""
     defaults = {
@@ -260,30 +271,29 @@ def get_group_settings(chat_id: int) -> dict:
         "antilink_enabled": False,
         "antiword_enabled": False,
         "antilink_warn_limit": 3,
-        "antiword_warn_limit": 3
+        "antiword_warn_limit": 3,
+        "welcome_enabled": False,
+        "welcome_message": None
     }
     
     sql = "SELECT * FROM group_settings WHERE chat_id = %s"
     conn = get_db_connection()
     try:
-        # Use your DictCursor here
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
             cur.execute(sql, (chat_id,))
             result = cur.fetchone()
             if result:
-                # We can now access by column name!
-                # Update defaults with whatever is in the DB
                 for key in defaults:
                     if key in result and result[key] is not None:
                         defaults[key] = result[key]
             return defaults
     except Exception as e:
         logger.error(f"Error in get_group_settings: {e}")
-        return defaults # Return defaults on error
+        return defaults
     finally:
         conn.close()
 
-# --- (NEW) Anti-Word ---
+# --- Anti-Word ---
 
 def add_antiword(chat_id: int, word: str) -> bool:
     sql = "INSERT INTO antiword_blacklist (chat_id, word) VALUES (%s, %s) ON CONFLICT DO NOTHING"
@@ -328,7 +338,7 @@ def get_antiword_list(chat_id: int) -> set:
     finally:
         conn.close()
 
-# --- (NEW) Anti-Link ---
+# --- Anti-Link ---
 
 def add_antilink_whitelist(chat_id: int, domain: str) -> bool:
     sql = "INSERT INTO antilink_whitelist (chat_id, domain) VALUES (%s, %s) ON CONFLICT DO NOTHING"
@@ -373,7 +383,7 @@ def get_antilink_whitelist(chat_id: int) -> set:
     finally:
         conn.close()
 
-# --- (NEW) User Warnings ---
+# --- User Warnings ---
 
 def get_user_warnings(chat_id: int, user_id: int, warn_type: str) -> int:
     """Gets the current warning count for a user and type. Defaults to 0."""
