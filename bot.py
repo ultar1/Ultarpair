@@ -54,9 +54,27 @@ except Exception as e:
     exit(1)
 
 
-# --- NEW: Simple HTTP Health Check Handler ---
-async def health_check_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the /health endpoint for cron jobs and self-ping."""
+# --- NEW: Simple Public Health Check Handler ---
+# This is a generic HTTP handler (not a Telegram handler)
+async def http_health_check(request):
+    """
+    Handles GET requests to the root URL (/) and returns a simple status message.
+    This fixes the 404 error when opening the app URL in a browser.
+    """
+    from telegram.ext.callbackcontext import CallbackContext
+    from telegram.ext.extbot import ExtBot
+    
+    # We use a placeholder HTTP response to confirm the worker is alive
+    response_body = "Group Moderation Bot is ALIVE and webhook is ready."
+    
+    # Returning a list of bytes is the standard way to respond to raw HTTP requests
+    return [response_body.encode()]
+
+
+# --- Telegram Command Health Check Handler (Internal Ping) ---
+async def command_health_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the internal /health command for self-ping and returns 'ok'."""
+    # This handler is only for internal automated calls
     if not update.effective_user and update.message and update.message.text == "/health":
         await update.message.reply_text("ok", quote=False)
 
@@ -86,7 +104,7 @@ async def setup_bot():
     application.add_handler(CommandHandler("welcome", welcome_command))     
     application.add_handler(CommandHandler("setwelcome", setwelcome_command))   
     
-    application.add_handler(CommandHandler("health", health_check_handler)) # Health check command
+    application.add_handler(CommandHandler("health", command_health_check)) # Internal health check
     
     # Chat Member Handler (group 0)
     application.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
@@ -97,6 +115,9 @@ async def setup_bot():
         handle_message
     ), group=1)
 
+    # --- FIX: Add the raw HTTP handler for the base URL ---
+    application.add_handler(http_health_check) # <-- THIS HANDLES THE 404
+
     logger.info("Initializing Telegram Application...")
     await application.initialize()
     logger.info("Handlers and DB are set up.")
@@ -106,7 +127,7 @@ async def ping_self_loop():
     """Pings a service every 6 minutes to prevent the app from spinning down."""
     PING_INTERVAL = 6 * 60 
     
-    # FIX: PING the main webhook URL and include the command as parameter
+    # We ping the dedicated /health endpoint using the webhook path
     ping_url = f"{config.WEBHOOK_URL}/webhook?message=/health"
 
     logger.info("Self-ping worker started.")
@@ -116,7 +137,6 @@ async def ping_self_loop():
         try:
             logger.info(f"Pinging self at {ping_url} to stay alive...")
             async with httpx.AsyncClient(timeout=10) as client:
-                # Use a POST request to hit the webhook endpoint
                 response = await client.post(ping_url) 
                 logger.info(f"Self-ping successful. Status: {response.status_code}")
         except Exception as e:
@@ -133,10 +153,8 @@ async def main():
 
     PORT = int(os.environ.get("PORT", 8443))
     
-    # --- FIX: Simplify webhook URL path ---
-    # The URL that Telegram calls should be unique, so we'll use the token itself
-    # Example: https://yourdomain.com/8573653240:AAEZmLEj5nJc5CU6-UCvcbZH8_Kj7i_egJ0
-    webhook_path = config.TOKEN.split(':')[-1] # Use the second half of the token as the path
+    # The URL path for the webhook is based on the token
+    webhook_path = config.TOKEN.split(':')[-1]
     WEBHOOK_URL = f"{config.WEBHOOK_URL}/{webhook_path}"
     
     logger.info(f"Starting webhook server on 0.0.0.0:{PORT}")
@@ -145,7 +163,7 @@ async def main():
     await application.updater.start_webhook(
         listen="0.0.0.0",
         port=PORT,
-        url_path=webhook_path, # Use the simplified path here
+        url_path=webhook_path, 
         webhook_url=WEBHOOK_URL,
         allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER]
     )
