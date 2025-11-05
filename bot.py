@@ -16,7 +16,7 @@ import config
 from database import init_db
 
 # Import httpx for the self-ping loop
-import httpx # <-- Make sure this is installed!
+import httpx 
 
 # Import handlers
 from commands import (
@@ -55,10 +55,8 @@ except Exception as e:
 
 
 # --- NEW: Simple HTTP Health Check Handler ---
-# This handler is hit by the self-ping loop to keep the app awake.
 async def health_check_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the /health endpoint for cron jobs and self-ping."""
-    # Only reply if it's an internal HTTP call (no effective user) and the command is /health
     if not update.effective_user and update.message and update.message.text == "/health":
         await update.message.reply_text("ok", quote=False)
 
@@ -88,10 +86,8 @@ async def setup_bot():
     application.add_handler(CommandHandler("welcome", welcome_command))     
     application.add_handler(CommandHandler("setwelcome", setwelcome_command))   
     
-    # --- FIX: Register the health check handler ---
-    application.add_handler(CommandHandler("health", health_check_handler))
-    # --- END FIX ---
-
+    application.add_handler(CommandHandler("health", health_check_handler)) # Health check command
+    
     # Chat Member Handler (group 0)
     application.add_handler(ChatMemberHandler(check_new_member, ChatMemberHandler.CHAT_MEMBER))
 
@@ -110,7 +106,7 @@ async def ping_self_loop():
     """Pings a service every 6 minutes to prevent the app from spinning down."""
     PING_INTERVAL = 6 * 60 
     
-    # PING the dedicated /webhook?message=/health endpoint
+    # FIX: PING the main webhook URL and include the command as parameter
     ping_url = f"{config.WEBHOOK_URL}/webhook?message=/health"
 
     logger.info("Self-ping worker started.")
@@ -122,7 +118,6 @@ async def ping_self_loop():
             async with httpx.AsyncClient(timeout=10) as client:
                 # Use a POST request to hit the webhook endpoint
                 response = await client.post(ping_url) 
-                # We expect status 200/202 from the webhook server
                 logger.info(f"Self-ping successful. Status: {response.status_code}")
         except Exception as e:
             logger.error(f"Self-ping FAILED: {e}")
@@ -137,7 +132,12 @@ async def main():
     await setup_bot() 
 
     PORT = int(os.environ.get("PORT", 8443))
-    WEBHOOK_URL = f"{config.WEBHOOK_URL}/webhook"
+    
+    # --- FIX: Simplify webhook URL path ---
+    # The URL that Telegram calls should be unique, so we'll use the token itself
+    # Example: https://yourdomain.com/8573653240:AAEZmLEj5nJc5CU6-UCvcbZH8_Kj7i_egJ0
+    webhook_path = config.TOKEN.split(':')[-1] # Use the second half of the token as the path
+    WEBHOOK_URL = f"{config.WEBHOOK_URL}/{webhook_path}"
     
     logger.info(f"Starting webhook server on 0.0.0.0:{PORT}")
     
@@ -145,7 +145,7 @@ async def main():
     await application.updater.start_webhook(
         listen="0.0.0.0",
         port=PORT,
-        url_path="webhook", 
+        url_path=webhook_path, # Use the simplified path here
         webhook_url=WEBHOOK_URL,
         allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER]
     )
@@ -175,7 +175,6 @@ if __name__ == "__main__":
         logger.critical("!!! ERROR: Missing TOKEN, DATABASE_URL, or WEBHOOK_URL. !!!")
         exit(1)
     
-    # We must ensure httpx is installed for this worker to run correctly
     try:
         import httpx
     except ImportError:
